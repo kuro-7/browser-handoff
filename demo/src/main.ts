@@ -1,6 +1,8 @@
 // 実機確認用のデモページ（設計書 8章）。
 // GeoCutter を通さずに、キットの detectContext・planEscape・escapeToBrowser・startRedemption を動かして記録する。
 // 「アカウント」は乱数の ID と記録の数を localStorage に置くだけ。
+//
+// 画面は「今いる場所でやること」だけを大きく出し、細かい情報や切り替えは「詳しい情報」に畳む。
 import {
   detectContext,
   planEscape,
@@ -20,28 +22,29 @@ import {
   clearTicketFromAddressBar,
   escapeToBrowser,
   overrideManifest,
-  putTicketInAddressBar,
+  reloadWithTicket,
   settleTicket,
   startRedemption,
   type RedemptionHost,
+  type StartRedemptionResult,
 } from '../../src/client/index.js';
 
 // ---------- 端末に置くもの ----------
 
 const memory = new Map<string, string>();
-function load<T>(key: string, fallback: T): T {
+function load<T>(key: string, fallback: T, storage: 'local' | 'session' = 'local'): T {
   try {
-    const raw = localStorage.getItem(key) ?? memory.get(key);
+    const raw = (storage === 'local' ? localStorage : sessionStorage).getItem(key) ?? memory.get(`${storage}:${key}`);
     return raw === undefined || raw === null ? fallback : (JSON.parse(raw) as T);
   } catch {
     return fallback;
   }
 }
-function save(key: string, value: unknown): void {
+function save(key: string, value: unknown, storage: 'local' | 'session' = 'local'): void {
   const raw = JSON.stringify(value);
-  memory.set(key, raw);
+  memory.set(`${storage}:${key}`, raw);
   try {
-    localStorage.setItem(key, raw);
+    (storage === 'local' ? localStorage : sessionStorage).setItem(key, raw);
   } catch {
     // 使えない WebView もある。そのときはこのページを開いている間だけ覚える。
   }
@@ -109,7 +112,7 @@ async function api<T>(action: string, body: unknown): Promise<T> {
 interface Issued {
   ticket: string;
   expiresAt: number;
-  purpose: Purpose;
+  subjectId: string;
 }
 async function issue(purpose: Purpose): Promise<Issued> {
   const subject = ensureSubject();
@@ -119,7 +122,7 @@ async function issue(purpose: Purpose): Promise<Issued> {
     payload: JSON.stringify({ plays: subject.plays }),
   });
   record(`券を発行（${purpose}）: ${mask(res.ticket)} 期限 ${time(res.expiresAt)}`);
-  return { ...res, purpose };
+  return { ...res, subjectId: subject.id };
 }
 
 // ---------- 言葉（デモの画面用） ----------
@@ -138,40 +141,52 @@ const APP_NAMES: Record<InAppName, string> = {
   other: '名前の分からないアプリ',
 };
 
-function describeContext(c: BrowserContext): { place: string; storage: string } {
+function describePlace(c: BrowserContext): string {
   const place =
     c.kind === 'in-app'
       ? `${APP_NAMES[c.app ?? 'other']} のアプリ内ブラウザ`
       : c.kind === 'standalone'
         ? 'ホーム画面アプリ'
         : '通常のブラウザ';
-  const other = c.kind === 'in-app' ? '通常のブラウザ' : c.kind === 'standalone' ? 'ブラウザ' : 'ホーム画面アプリ';
-  const storage =
-    c.storage === 'separate'
-      ? `${other}とは保存場所が別（引き継ぎが要る）`
-      : c.storage === 'shared'
-        ? `${other}と保存場所が同じ（引き継ぎは要らない）`
-        : `${other}と保存場所が同じか分からない`;
-  return { place: `${PLATFORM_NAMES[c.platform]} の${place}`, storage };
+  return `${PLATFORM_NAMES[c.platform]} の${place}`;
 }
 
-function describeMenu(menu: MenuHint | null, platform: Platform): string {
-  if (menu === null) return '表に無い（分からない）。「共有」や「⋯」からブラウザで開く項目を探してください';
+// 設計書 4章の表の、実際の項目名。キットは場所の種類（MenuHint）しか返さないので、画面の言葉はホスト（ここ）が持つ。
+const MENU_WORDS: Partial<Record<Platform, Partial<Record<InAppName, string>>>> = {
+  ios: {
+    line: '共有ボタン →「Safari で開く」',
+    x: '共有ボタン →「Safari で開く」',
+    instagram: '「⋯」→「外部ブラウザで開く」',
+    threads: '「⋯」→「外部ブラウザで開く」',
+    facebook: '「⋯」→「外部ブラウザで開く」',
+  },
+  android: {
+    line: '「⋮」→「デフォルトのブラウザで開く」',
+    x: '「⋮」→「ブラウザで開く」',
+    instagram: '「⋮」→「外部ブラウザで開く」',
+    threads: '「⋮」→「外部ブラウザで開く」',
+    facebook: '「⋮」→「外部ブラウザで開く」',
+  },
+};
+
+function describeMenu(app: InAppName, platform: Platform, menu: MenuHint | null): string {
+  const words = MENU_WORDS[platform]?.[app];
+  if (words) return words;
+  if (menu === null) return '「共有」や「⋯」「⋮」の中から、ブラウザで開く項目を探してください';
   const opener = menu.opener === 'share' ? '共有ボタン' : platform === 'android' ? '「⋮」' : '「⋯」';
-  const item = menu.item === 'open-in-browser' ? '「（外部）ブラウザで開く」「Safari で開く」' : '「他のアプリで開く」';
-  return `${opener} → ${item}`;
+  return `${opener} →「ブラウザで開く」のような項目`;
 }
 
 function describeDecision(d: RedemptionDecision): string {
   switch (d.action) {
     case 'noop':
-      return 'noop: 何もしない（同じアカウント、または決着済み）';
+      return 'noop（何もしない）';
     case 'adopt':
-      return 'adopt: 黙って受け取る';
+      return 'adopt（黙って受け取る）';
     case 'choose':
-      return `choose: どちらを使うか選んでもらう（この端末 ${d.deviceSubjectId} ／ 券 ${d.ticketSubjectId}）`;
+      return `choose（どちらか選ぶ: この端末 ${d.deviceSubjectId} ／ 券 ${d.ticketSubjectId}）`;
     case 'notify':
-      return `notify: 知らせる（${NOTIFY_REASONS[d.reason]}）`;
+      return `notify（${NOTIFY_REASONS[d.reason]}）`;
   }
 }
 const NOTIFY_REASONS = {
@@ -203,6 +218,10 @@ function fill(el: HTMLElement, ...children: Child[]): void {
 function dl(rows: Array<[string, Child]>): HTMLDListElement {
   return h('dl', {}, ...rows.flatMap(([k, v]) => [h('dt', {}, k), h('dd', {}, v)]));
 }
+/** 結果の大きな表示。tone は ok（うまくいった）・warn（要注意）・ng（だめ）・plain。 */
+function status(tone: 'ok' | 'warn' | 'ng' | 'plain', title: string, ...body: Child[]): HTMLElement {
+  return h('div', { class: `status ${tone}` }, h('p', { class: 'status-title' }, title), ...body.map((b) => (typeof b === 'string' ? h('p', {}, b) : b)));
+}
 
 // ---------- 今の場所 ----------
 
@@ -215,30 +234,12 @@ const env = {
 const context = detectContext(env);
 where = [context.platform, context.kind, context.app].filter(Boolean).join('/');
 const launchUrl = location.href;
+const hadSubjectAtLaunch = loadSubject() !== null;
 
-function contextSection(): HTMLElement {
-  const d = describeContext(context);
-  return h(
-    'section',
-    {},
-    h('h2', {}, '今いる場所', h('span', { class: 'tag' }, 'detectContext')),
-    h('p', { class: 'summary' }, d.place),
-    h('p', {}, d.storage),
-    dl([
-      ['platform', context.platform],
-      ['kind', context.kind],
-      ['app', context.app ?? '—'],
-      ['storage', context.storage],
-      ['standalone', `navigator.standalone=${env.standalone} / display-mode=${env.displayModeStandalone}`],
-      ['タッチ点', String(env.maxTouchPoints)],
-    ]),
-    h('div', { class: 'mono' }, env.userAgent),
-  );
-}
+// ---------- アカウント（ID） ----------
 
-// ---------- このページのアカウント ----------
-
-const subjectView = h('div');
+const idChip = h('span', { class: 'id-chip' });
+const idDetail = h('div');
 function ensureSubject(): Subject {
   let s = loadSubject();
   if (s === null) {
@@ -251,10 +252,11 @@ function ensureSubject(): Subject {
 }
 function renderSubject(): void {
   const s = loadSubject();
+  fill(idChip, `ID ${s?.id ?? '—'}`);
   fill(
-    subjectView,
-    h('div', { class: 'big-id' }, s?.id ?? '（まだ無い）'),
-    h('p', {}, `記録: ${s?.plays ?? 0} 回`, s && s.plays === 0 ? '（記録なし）' : ''),
+    idDetail,
+    h('p', {}, `ID: `, h('code', {}, s?.id ?? '（まだ無い）'), ` ／ 記録 ${s?.plays ?? 0} 回`),
+    h('p', { class: 'note' }, '保存場所ごとに別の ID になります。別のアプリやブラウザで同じ ID が出たら、保存場所が同じということです。'),
     h(
       'div',
       { class: 'row' },
@@ -268,24 +270,14 @@ function renderSubject(): void {
         const next = { id: newSubjectId(), plays: 0 };
         saveSubject(next);
         record(`ID を作り直した: ${next.id}`);
+        forgetEscapeTicket();
         renderSubject();
-        escapeTicket = null;
-        renderEscapeTicket();
       } }, '新しい ID にする'),
     ),
   );
 }
-function subjectSection(): HTMLElement {
-  return h(
-    'section',
-    {},
-    h('h2', {}, 'このページのアカウント（デモ）'),
-    h('p', { class: 'note' }, '保存場所ごとに別の ID になります。別のアプリやブラウザで同じ ID が出たら、保存場所が同じということです（Android の X が Custom Tabs 型かの確認に使えます）。'),
-    subjectView,
-  );
-}
 
-// ---------- 外のブラウザで開く（A1・A4、うまくいかなければ A2・A5） ----------
+// ---------- 外のブラウザで開く（A1・A4、だめならメニュー A2・A5） ----------
 
 interface Method {
   id: string;
@@ -295,23 +287,39 @@ interface Method {
 }
 const METHODS: Method[] = [
   { id: 'auto', label: '自動（今の場所の方法）' },
+  { id: 'none', label: '手段なし（メニューから開く練習）', as: null },
   { id: 'ios-safari', label: 'x-safari-https://（iOS の X などの方法）', as: { platform: 'ios', app: 'x' } },
   { id: 'ios-instagram', label: 'instagram://extbrowser（iOS の Instagram の方法）', as: { platform: 'ios', app: 'instagram' } },
   { id: 'ios-threads', label: 'barcelona://extbrowser（iOS の Threads の方法）', as: { platform: 'ios', app: 'threads' } },
   { id: 'line', label: 'openExternalBrowser=1（LINE の方法）', as: { platform: context.platform, app: 'line' } },
   { id: 'android', label: 'intent://（Android の方法）', as: { platform: 'android', app: 'other' } },
-  { id: 'none', label: '手段なし（メニューの案内だけ）', as: null },
 ];
+const METHOD_KEY = 'demo.method';
+const ESCAPE_TICKET_KEY = 'demo.escapeTicket';
 
+// 押す前に用意しておく券。読み込み直しても使い続けられるように sessionStorage にも置く
+// （作り直すと、escape は古い券を無効にするので、URL に付けた券が届かなくなる）。
 let escapeTicket: Issued | null = null;
 let preparing: Promise<Issued> | null = null;
+
 const methodSelect = h('select', { id: 'method' }, ...METHODS.map((m) => h('option', { value: m.id }, m.label)));
-const graceInput = h('input', { type: 'number', value: String(DEFAULT_GRACE_MS), min: '0', step: '100', inputmode: 'numeric', style: 'width:8em' });
+const graceInput = h('input', { type: 'number', value: String(DEFAULT_GRACE_MS), min: '0', step: '100', inputmode: 'numeric', style: 'width:7em' });
 const planView = h('div');
 const ticketView = h('span', { class: 'note' });
 const escapeButton = h('button', { class: 'primary' }, '外のブラウザで開く');
 const escapeResult = h('div');
-const signalList = h('ol', { class: 'signals' });
+
+function forgetEscapeTicket(): void {
+  escapeTicket = null;
+  save(ESCAPE_TICKET_KEY, null, 'session');
+  renderEscapeTicket();
+}
+
+function restoreEscapeTicket(): void {
+  const saved = load<Issued | null>(ESCAPE_TICKET_KEY, null, 'session');
+  const subject = loadSubject();
+  if (saved && subject && saved.subjectId === subject.id && saved.expiresAt - Date.now() > 30_000) escapeTicket = saved;
+}
 
 function targetUrl(ticket: string): string {
   return withTicket(location.origin + location.pathname, ticket);
@@ -328,25 +336,29 @@ function buildPlan(ticket: string): EscapePlan {
   return { step: planEscape(as, target).step, fallback: real.fallback };
 }
 
+function menuWords(plan: EscapePlan): string {
+  return describeMenu(plan.fallback.app, plan.fallback.platform, plan.fallback.menu);
+}
+
 function renderPlan(): void {
   const plan = buildPlan(escapeTicket?.ticket ?? 'AAAAAAAAAAAAAAAAAAAAAA');
   fill(
     planView,
     dl([
-      ['開き方', plan.step.kind === 'navigate' ? h('code', {}, maskUrl(plan.step.href)) : 'none（自動で開く手段が無い）'],
-      ['だめなとき', describeMenu(plan.fallback.menu, plan.fallback.platform)],
+      ['開き方', plan.step.kind === 'navigate' ? h('code', {}, maskUrl(plan.step.href)) : 'なし（メニューから開いてもらう）'],
+      ['メニュー', menuWords(plan)],
     ]),
   );
 }
 
 function renderEscapeTicket(): void {
   if (escapeTicket === null) {
-    fill(ticketView, preparing ? '券を用意しています…' : '券はまだありません（押したときに用意します）');
+    fill(ticketView, preparing ? '券を用意しています…' : '券はまだありません');
   } else {
     const left = Math.max(0, escapeTicket.expiresAt - Date.now());
     const m = Math.floor(left / 60000);
     const s = Math.floor((left % 60000) / 1000);
-    fill(ticketView, left > 0 ? `券を用意済み: ${mask(escapeTicket.ticket)}（あと ${m}分${String(s).padStart(2, '0')}秒）` : '券の期限が切れました（押したときに作り直します）');
+    fill(ticketView, left > 0 ? `券 ${mask(escapeTicket.ticket)}（あと ${m}分${String(s).padStart(2, '0')}秒）` : '券の期限が切れました');
   }
   renderPlan();
 }
@@ -359,6 +371,7 @@ function prepareEscapeTicket(): Promise<Issued> {
   preparing ??= issue('escape')
     .then((t) => {
       escapeTicket = t;
+      save(ESCAPE_TICKET_KEY, t, 'session');
       return t;
     })
     .finally(() => {
@@ -374,10 +387,8 @@ function watchSignals(t0: number): { first: () => string | null; stop: () => voi
   let first: string | null = null;
   let lastTick = Date.now();
   const add = (name: string) => {
-    const ms = Date.now() - t0;
-    const line = `${name}（${ms}ms）`;
+    const line = `${name}（${Date.now() - t0}ms）`;
     first ??= line;
-    signalList.append(h('li', {}, line));
     record(`合図: ${line}`);
   };
   // Android は裏に回ったページのタイマーを止めずに1秒ごとに動かすので、遅れが続けて来る。
@@ -426,11 +437,23 @@ function watchSignals(t0: number): { first: () => string | null; stop: () => voi
 
 let stopWatching: (() => void) | null = null;
 
+/** メニューから開いてもらう案内（読み込み直したあとにも出す）。 */
+function showMenuGuide(plan: EscapePlan): void {
+  fill(
+    escapeResult,
+    status(
+      'warn',
+      'ボタンでは開けませんでした',
+      h('p', {}, 'アプリのメニューから開いてください:'),
+      h('p', { class: 'menu-words' }, menuWords(plan)),
+      '開いた先の画面に「届きました」と出れば成功です。メニューが違ったら、下の「見たこと」で教えてください。',
+    ),
+  );
+}
+
 async function onEscapeClick(): Promise<void> {
   const t0 = Date.now();
   stopWatching?.();
-  fill(signalList);
-  fill(escapeResult);
   const method = methodSelect.value;
   const graceMs = Number(graceInput.value) || DEFAULT_GRACE_MS;
 
@@ -443,20 +466,20 @@ async function onEscapeClick(): Promise<void> {
       ticket = await prepareEscapeTicket();
     } catch (e) {
       record(`券を発行できなかった: ${String(e)}`);
-      fill(escapeResult, h('div', { class: 'result warn' }, `券を発行できませんでした: ${String(e)}`));
+      fill(escapeResult, status('ng', '券を発行できませんでした', String(e)));
       return;
     }
   }
   const plan = buildPlan(ticket.ticket);
   record(
     `ボタンを押した: 方法=${method} 猶予=${graceMs}ms${late ? '（券の発行を待ってから移った）' : ''} → ${
-      plan.step.kind === 'navigate' ? maskUrl(plan.step.href) : 'none'
+      plan.step.kind === 'navigate' ? maskUrl(plan.step.href) : 'なし'
     }`,
   );
   const watcher = watchSignals(t0);
   stopWatching = watcher.stop;
   escapeButton.disabled = true;
-  fill(escapeResult, h('div', { class: 'result plain' }, '結果を待っています…'));
+  fill(escapeResult, status('plain', '開いています…'));
 
   const result = await escapeToBrowser(plan, { graceMs });
   escapeButton.disabled = false;
@@ -466,88 +489,61 @@ async function onEscapeClick(): Promise<void> {
   if (result === 'opened') {
     clearTicketFromAddressBar();
     // 外のブラウザがこの券を受け取る前に新しい券を発行すると、escape は古い券を無効にするので届かなくなる。
-    // 次の券は、戻ってきて押したとき（または「券を用意し直す」）に作る。
-    escapeTicket = null;
-    renderEscapeTicket();
+    // 次の券は、次に押したとき（または「券を用意し直す」）に作る。
+    forgetEscapeTicket();
     fill(
       escapeResult,
-      h('div', { class: 'result ok' }, h('strong', {}, 'opened: 外に出たようです'), h('br'), `最初の合図: ${first ?? '—'}`),
+      status('ok', '外のブラウザが開いたようです', '開いた先の画面に「届きました」と出ているか見てください。', h('p', { class: 'note' }, `最初の合図: ${first ?? '—'}`)),
     );
   } else {
-    // ボタンが効かなかった。メニューから開いても届くように、今の URL に券を付ける。
-    putTicketInAddressBar(ticket.ticket);
-    record(`URL に券を付けた: ${maskUrl(location.href)}`);
-    fill(
-      escapeResult,
-      h(
-        'div',
-        { class: 'result warn' },
-        h('strong', {}, 'fallback: 合図が来ませんでした'),
-        h('br'),
-        `アプリのメニューから開いてください: ${describeMenu(plan.fallback.menu, plan.fallback.platform)}`,
-        h('br'),
-        '今のページの URL に券を付けたので、メニューから開いても届くはずです。',
-      ),
-    );
+    // ボタンが効かなかった。メニューから開いても届くように、券付きの URL で読み込み直す。
+    // 読み込み直したあとは startRedemption が escapePending を返すので、そこで案内を出す。
+    record(`メニューのために、券付きの URL で読み込み直す: ${maskUrl(withTicket(location.href, ticket.ticket))}`);
+    reloadWithTicket(ticket.ticket);
   }
-  // fallback のときは同じ券を使い続ける（URL に付けた券を、新しい発行で無効にしないように）。
 }
 
-const OBSERVATIONS = [
-  'ブラウザが開いた',
-  '開く前に確認が出た（1回余分に押した）',
-  '何も起きなかった',
-  'このページが読み込み直された',
-  'メニューの場所は表のとおり',
-  'メニューの場所が違った',
-  'メニューから開いたら届いた',
-];
-const memoInput = h('input', { type: 'text', placeholder: 'アプリ名と版、気づいたこと' });
-
-function escapeSection(): HTMLElement {
+function escapeCard(): HTMLElement {
   escapeButton.addEventListener('click', () => void onEscapeClick());
-  methodSelect.addEventListener('change', () => {
-    record(`方法を変えた: ${methodSelect.value}`);
-    renderPlan();
-    if (escapeTicket === null) void prepareEscapeTicket().catch(() => {});
-  });
   return h(
     'section',
     {},
-    h('h2', {}, '外のブラウザで開く', h('span', { class: 'tag' }, 'A1・A4 → A2・A5')),
-    h('p', { class: 'note' }, 'アプリ内ブラウザで開いて押してください。開けたかの判定（opened / fallback）と、来た合図を記録します。'),
-    h('label', { class: 'field', for: 'method' }, '開き方'),
+    h('h2', {}, '外のブラウザで開く'),
+    h('p', {}, 'ボタンを押してください。外のブラウザが開いて、そちらの画面に「届きました」と出れば成功です。'),
+    escapeButton,
+    escapeResult,
+  );
+}
+
+function escapeSettings(): HTMLElement {
+  methodSelect.value = load(METHOD_KEY, 'auto');
+  if (methodSelect.value === '') methodSelect.value = 'auto';
+  methodSelect.addEventListener('change', () => {
+    save(METHOD_KEY, methodSelect.value);
+    record(`開き方を変えた: ${methodSelect.value}`);
+    renderPlan();
+  });
+  return h(
+    'div',
+    {},
+    h('h3', {}, '開き方を変える'),
+    h('p', { class: 'note' }, '「手段なし」にすると、ボタンを押したときにメニューの案内が出ます（メニューから開く練習）。'),
     h('div', { class: 'row' }, methodSelect),
-    h('div', { class: 'row' }, h('label', { class: 'note' }, '待つ時間 ', graceInput, ' ms')),
+    h('div', { class: 'row' }, h('label', { class: 'note' }, '合図を待つ時間 ', graceInput, ' ms')),
     planView,
     h(
       'div',
       { class: 'row' },
       ticketView,
       h('button', { onclick: () => {
-        escapeTicket = null;
+        forgetEscapeTicket();
         void prepareEscapeTicket().catch((e) => record(`券を用意できなかった: ${String(e)}`));
       } }, '券を用意し直す'),
-    ),
-    escapeButton,
-    escapeResult,
-    signalList,
-    h('label', { class: 'field' }, '見たことを記録する'),
-    h('div', { class: 'chips' }, ...OBSERVATIONS.map((o) => h('button', { onclick: () => record(`観察: ${o}`) }, o))),
-    h(
-      'div',
-      { class: 'row' },
-      memoInput,
-      h('button', { onclick: () => {
-        if (memoInput.value.trim() === '') return;
-        record(`メモ: ${memoInput.value.trim()}`);
-        memoInput.value = '';
-      } }, 'メモを残す'),
     ),
   );
 }
 
-// ---------- 受け取り（起動時） ----------
+// ---------- 受け取り（ページを開いたとき） ----------
 
 const NOTIFIED_KEY = 'demo.notified';
 const host: RedemptionHost<{ subjectId: string }> = {
@@ -574,87 +570,101 @@ const host: RedemptionHost<{ subjectId: string }> = {
   markNotified: (ticket) => save(NOTIFIED_KEY, [...load<string[]>(NOTIFIED_KEY, []), ticket].slice(-50)),
 };
 
-const redemptionView = h('div');
-const hadSubjectAtLaunch = loadSubject() !== null;
+const receiveView = h('div');
+const receiveFacts = h('div', { class: 'note' });
 
 async function settle(ticket: string, choice: 'take' | 'keep'): Promise<void> {
   try {
     if (choice === 'take') {
       const r = await settleTicket(host, ticket, 'take');
       record(`settleTicket take: 受け取った（主体 ${r.credential.subjectId}）`);
-      redemptionView.append(h('div', { class: 'result ok' }, `受け取りました。この端末の ID は ${r.credential.subjectId} になりました。`));
+      fill(receiveView, status('ok', '届きました', `アカウントを引き継ぎました。この画面の ID は ${r.credential.subjectId} になりました。`));
     } else {
       await settleTicket(host, ticket, 'keep');
       record('settleTicket keep: 今のままにした');
-      redemptionView.append(h('div', { class: 'result plain' }, '今のままにしました（券は使用済み）。'));
+      fill(receiveView, status('ok', '届きました', '「今のまま」を選んだので、アカウントはそのままです（券は使用済み）。'));
     }
   } catch (e) {
     record(`settleTicket ${choice} で失敗: ${String(e)}`);
-    redemptionView.append(h('div', { class: 'result warn' }, `失敗しました: ${String(e)}`));
+    fill(receiveView, status('ng', '受け取りに失敗しました', String(e)));
   }
   renderSubject();
 }
 
-async function runRedemption(): Promise<void> {
+/** ページを開いたときの受け取り。メニューの案内の途中（escapePending）なら、その結果を返す。 */
+async function runRedemption(): Promise<StartRedemptionResult | null> {
   const fromStartUrl = new URL(launchUrl).searchParams.get('src') === 'home-screen';
-  const rows: Array<[string, Child]> = [
-    ['開いた URL', h('code', {}, maskUrl(launchUrl))],
-    ['開いたときの ID', hadSubjectAtLaunch ? 'あった' : '無かった'],
-  ];
-  if (context.kind === 'standalone') {
-    rows.push(['start_url', fromStartUrl ? 'manifest の start_url で開いた' : 'start_url ではない URL で開いた']);
-  }
   record(
     `ページを開いた: ${maskUrl(launchUrl)} ID${hadSubjectAtLaunch ? 'あり' : 'なし'}${
       context.kind === 'standalone' ? ` start_url=${fromStartUrl ? 'はい' : 'いいえ'}` : ''
     }`,
   );
+  const facts: Array<[string, Child]> = [['開いた URL', h('code', {}, maskUrl(launchUrl))]];
+  if (context.kind === 'standalone') {
+    facts.push(['起動 URL', fromStartUrl ? 'manifest の start_url で開いた' : 'start_url ではない URL で開いた']);
+  }
 
-  let started: Awaited<ReturnType<typeof startRedemption<{ subjectId: string }>>> = null;
+  let started: StartRedemptionResult | null = null;
   try {
     started = await startRedemption(host);
   } catch (e) {
     record(`startRedemption で失敗: ${String(e)}`);
-    rows.push(['判断', `失敗: ${String(e)}`]);
+    fill(receiveView, status('ng', '受け取りの確認に失敗しました', String(e)));
+    fill(receiveFacts, dl(facts));
+    return null;
+  }
+
+  if (started?.escapePending) {
+    record(`startRedemption: 券 ${mask(started.ticket)} → メニューの案内の途中（escapePending）`);
+    fill(receiveView, status('plain', 'メニューから開いてもらう途中です', 'この画面自身が付けた券なので、受け取りはしません。'));
+    return started;
   }
 
   if (started === null) {
-    rows.push(['判断', '券なし（null）']);
+    record('startRedemption: 券なし');
     if (!hadSubjectAtLaunch && context.kind === 'standalone') {
       // 図1の B2: ホーム画面アプリの初回起動で、端末に主体が無く、券も無い。
       record('B2: 券が届かなかった（ホーム画面アプリの初回起動で、ID も券も無い）');
-      rows.push(['B2', '届かなかった（ホストならログインで移す案内を出すところ）']);
+    }
+    if (context.kind !== 'in-app') {
+      fill(receiveView, status('plain', '券なしで開きました', 'アプリから移ってきてこれが出たなら、券は届いていません。'));
     }
   } else {
-    record(`startRedemption: 券 ${mask(started.ticket)} → ${describeDecision(started.decision)}`);
-    rows.push(['券', mask(started.ticket)], ['判断', describeDecision(started.decision)]);
+    const { ticket, decision } = started;
+    record(`startRedemption: 券 ${mask(ticket)} → ${describeDecision(decision)}`);
+    facts.push(['判断', describeDecision(decision)]);
+    switch (decision.action) {
+      case 'adopt':
+        fill(receiveView, status('plain', '受け取っています…'));
+        await settle(ticket, 'take');
+        break;
+      case 'noop':
+        fill(receiveView, status('ok', '届きました', 'もう同じアカウントなので、そのままにしました。'));
+        break;
+      case 'choose': {
+        const buttons = h(
+          'div',
+          { class: 'row' },
+          h('button', { onclick: () => void settle(ticket, 'take') }, '券のアカウントにする'),
+          h('button', { onclick: () => void settle(ticket, 'keep') }, '今のまま'),
+        );
+        fill(
+          receiveView,
+          status('warn', '届きました。どちらを使うか選んでください', `この画面の ID ${decision.deviceSubjectId} と、券の ID ${decision.ticketSubjectId} の両方に記録があります。`, buttons),
+        );
+        break;
+      }
+      case 'notify':
+        fill(receiveView, status('warn', '券は届きましたが、使えませんでした', NOTIFY_REASONS[decision.reason]));
+        break;
+    }
   }
-  fill(redemptionView, dl(rows));
-
-  if (started?.decision.action === 'adopt') {
-    await settle(started.ticket, 'take');
-  } else if (started?.decision.action === 'choose') {
-    const { ticket: t } = started;
-    const buttons = h(
-      'div',
-      { class: 'row' },
-      h('button', { onclick: () => { buttons.remove(); void settle(t, 'take'); } }, '券のアカウントを引き継ぐ'),
-      h('button', { onclick: () => { buttons.remove(); void settle(t, 'keep'); } }, '今のまま'),
-    );
-    redemptionView.append(buttons);
-  }
-  ensureSubject();
-  renderSubject();
+  fill(receiveFacts, dl(facts));
+  return started;
 }
 
-function redemptionSection(): HTMLElement {
-  return h(
-    'section',
-    {},
-    h('h2', {}, '受け取り', h('span', { class: 'tag' }, 'startRedemption')),
-    h('p', { class: 'note' }, 'このページを開いたときに、URL の券を調べた結果です。黙って受け取れるときは自動で受け取ります。'),
-    redemptionView,
-  );
+function receiveCard(): HTMLElement {
+  return h('section', {}, h('h2', {}, '受け取り'), receiveView, receiveFacts);
 }
 
 // ---------- ホーム画面に追加（B1） ----------
@@ -674,24 +684,36 @@ async function prepareHomeScreen(): Promise<void> {
     const manifest = (await (await fetch(manifestUrl)).json()) as { id?: string; start_url?: string };
     fill(
       homeView,
+      status('ok', '用意できました', 'このまま 共有 →「ホーム画面に追加」へ進んでください。'),
       h(
-        'div',
-        { class: 'result ok' },
-        'manifest を差し替えました。このまま 共有 →「ホーム画面に追加」へ進んでください。',
+        'details',
+        {},
+        h('summary', {}, '中身'),
+        dl([
+          ['券', `${mask(t.ticket)}（期限 ${time(t.expiresAt)}）`],
+          ['id', manifest.id ?? '—'],
+          ['start_url', h('code', {}, maskUrl(manifest.start_url ?? '—'))],
+        ]),
       ),
-      dl([
-        ['券', `${mask(t.ticket)}（期限 ${time(t.expiresAt)}）`],
-        ['id', manifest.id ?? '—'],
-        ['start_url', h('code', {}, maskUrl(manifest.start_url ?? '—'))],
-      ]),
     );
   } catch (e) {
     record(`ホーム画面用の券を用意できなかった: ${String(e)}`);
-    fill(homeView, h('div', { class: 'result warn' }, `失敗しました: ${String(e)}`));
+    fill(homeView, status('ng', '用意できませんでした', String(e)));
   }
 }
 
-function homeSection(): HTMLElement {
+function homeCard(): HTMLElement {
+  return h(
+    'section',
+    {},
+    h('h2', {}, 'ホーム画面に追加'),
+    h('p', {}, '① 下のボタンを押す ② 共有 →「ホーム画面に追加」③ 追加したアイコンから開いて、「届きました」と出るか見る。翌日以降に初めて開くのも試してください。'),
+    h('button', { class: 'primary', onclick: () => void prepareHomeScreen() }, 'ホーム画面用の券を用意する'),
+    homeView,
+  );
+}
+
+function homeSettings(): HTMLElement {
   const prepAtLoad = h('input', { type: 'checkbox' });
   prepAtLoad.checked = load(PREP_AT_LOAD_KEY, false);
   prepAtLoad.addEventListener('change', () => {
@@ -699,17 +721,9 @@ function homeSection(): HTMLElement {
     record(`開いたときに自動で用意する: ${prepAtLoad.checked ? 'オン' : 'オフ'}`);
   });
   return h(
-    'section',
-    {},
-    h('h2', {}, 'ホーム画面に追加', h('span', { class: 'tag' }, 'B1')),
-    h(
-      'p',
-      { class: 'note' },
-      'iPhone の Safari で使います。ボタンを押してから、共有 →「ホーム画面に追加」。追加したアイコンから初めて開いたとき、上の「受け取り」で届いたかが分かります。翌日以降に初めて開くのも試してください。',
-    ),
-    h('button', { class: 'primary', onclick: () => void prepareHomeScreen() }, 'ホーム画面用の券を用意する'),
-    h('div', { class: 'row' }, h('label', { class: 'note' }, prepAtLoad, ' ページを開いたときに自動で用意する（iOS が manifest を読む時機を確かめる用）')),
-    homeView,
+    'div',
+    { class: 'row' },
+    h('label', { class: 'note' }, prepAtLoad, ' ページを開いたときにホーム画面用の券を自動で用意する（iOS が manifest を読む時機を確かめる用）'),
   );
 }
 
@@ -759,50 +773,133 @@ async function copyReport(): Promise<void> {
   fill(copyStatus, ok ? 'コピーしました' : '自動でコピーできませんでした。下の欄を長押しして全部選んでコピーしてください');
 }
 
-function logSection(): HTMLElement {
+const OBSERVATIONS = ['開く前に確認が出た', '何も起きなかった', 'メニューの場所が違った', 'メニューが無かった'];
+const memoInput = h('input', { type: 'text', placeholder: '気づいたこと（アプリの版など）' });
+
+function logCard(): HTMLElement {
   renderLog();
   return h(
     'section',
     {},
-    h('h2', {}, '記録'),
-    h('p', { class: 'note' }, '記録は保存場所ごとに別です。アプリ内ブラウザとブラウザの両方でコピーしてください。'),
+    h('h2', {}, '記録を送る'),
+    h('p', { class: 'note' }, '記録は場所（アプリ・ブラウザ）ごとに別です。試したそれぞれの場所でコピーしてください。'),
+    h('div', { class: 'row' }, h('button', { class: 'secondary', onclick: () => void copyReport() }, '記録をコピー'), copyStatus),
+    reportArea,
+    h('p', { class: 'field' }, '見たこと（押すと記録に残ります）'),
+    h('div', { class: 'chips' }, ...OBSERVATIONS.map((o) => h('button', { onclick: () => {
+      record(`観察: ${o}`);
+      fill(copyStatus, `「${o}」を記録しました`);
+    } }, o))),
     h(
       'div',
       { class: 'row' },
-      h('button', { onclick: () => void copyReport() }, '記録をコピー'),
+      memoInput,
       h('button', { onclick: () => {
-        reportArea.value = report();
-        reportArea.classList.toggle('hidden');
-      } }, '全文を表示'),
-      h('button', { onclick: () => {
-        if (!confirm('記録を消しますか？')) return;
-        log = [];
-        save(LOG_KEY, log);
-        renderLog();
-      } }, '消す'),
-      copyStatus,
+        if (memoInput.value.trim() === '') return;
+        record(`メモ: ${memoInput.value.trim()}`);
+        fill(copyStatus, 'メモを記録しました');
+        memoInput.value = '';
+      } }, 'メモを残す'),
     ),
-    reportArea,
-    logView,
+    h(
+      'details',
+      {},
+      h('summary', {}, '記録の中身を見る'),
+      h(
+        'div',
+        { class: 'row' },
+        h('button', { onclick: () => {
+          if (!confirm('この場所の記録を消しますか？')) return;
+          log = [];
+          save(LOG_KEY, log);
+          renderLog();
+        } }, '記録を消す'),
+      ),
+      logView,
+    ),
+  );
+}
+
+// ---------- 詳しい情報 ----------
+
+function detailsCard(extra: HTMLElement[]): HTMLElement {
+  return h(
+    'section',
+    {},
+    h(
+      'details',
+      {},
+      h('summary', {}, '詳しい情報・切り替え'),
+      h('h3', {}, '場所の判定（detectContext）'),
+      dl([
+        ['platform', context.platform],
+        ['kind', context.kind],
+        ['app', context.app ?? '—'],
+        ['storage', context.storage],
+        ['standalone', `navigator.standalone=${env.standalone} / display-mode=${env.displayModeStandalone}`],
+        ['タッチ点', String(env.maxTouchPoints)],
+      ]),
+      h('div', { class: 'mono' }, env.userAgent),
+      h('h3', {}, 'アカウント'),
+      idDetail,
+      ...extra,
+    ),
   );
 }
 
 // ---------- 始める ----------
 
+/** この場所でいちばんにやること。 */
+function mainHint(): string {
+  if (context.kind === 'in-app') return 'アプリ内ブラウザです。「外のブラウザで開く」を試してください。';
+  if (context.kind === 'standalone') return 'ホーム画面アプリです。下の「受け取り」で、券が届いたかを見てください。';
+  if (context.storage === 'separate') return '通常のブラウザです。外から来たなら「受け取り」を、ホーム画面に追加するなら「ホーム画面に追加」を見てください。';
+  return '通常のブラウザです。外から来たなら「受け取り」を見てください。ここから試すことは特にありません（アプリの中でこのページを開いてください）。';
+}
+
 async function main(): Promise<void> {
   const app = document.getElementById('app')!;
-  fill(app, contextSection(), redemptionSection(), subjectSection(), escapeSection(), homeSection(), logSection());
-  record(`場所: ${describeContext(context).place}（${context.storage}） UA=${env.userAgent}`);
+  const inApp = context.kind === 'in-app';
+  const homeMain = context.kind === 'browser' && context.storage === 'separate';
+  const escapeExtras = [h('h3', {}, '外のブラウザで開く'), escapeSettings()];
+  const homeExtras = [h('h3', {}, 'ホーム画面に追加'), homeSettings()];
+
+  fill(
+    app,
+    h('section', { class: 'hero' }, h('p', { class: 'place' }, describePlace(context)), h('p', {}, mainHint()), idChip),
+    inApp ? escapeCard() : receiveCard(),
+    inApp ? null : homeMain ? homeCard() : null,
+    logCard(),
+    detailsCard([
+      ...(inApp ? escapeExtras : [escapeCard(), ...escapeExtras]),
+      ...(homeMain ? homeExtras : [homeCard(), ...homeExtras]),
+    ]),
+  );
+  record(`場所: ${describePlace(context)}（${context.storage}） UA=${env.userAgent}`);
   renderSubject();
+  restoreEscapeTicket();
   renderEscapeTicket();
   window.setInterval(() => {
     if (escapeTicket) renderEscapeTicket();
   }, 1000);
 
   // 受け取りを先に済ませる（済む前に券を発行すると、別の ID で発行してしまう）。
-  await runRedemption();
+  const started = await runRedemption();
+  ensureSubject();
+  renderSubject();
 
-  if (context.kind === 'in-app') void prepareEscapeTicket().catch((e) => record(`券を用意できなかった: ${String(e)}`));
+  if (started?.escapePending) {
+    // メニューの案内のために読み込み直したところ。同じ券を使い続け、案内をもう一度出す。
+    restoreEscapeTicket();
+    if (escapeTicket?.ticket !== started.ticket) {
+      const subject = ensureSubject();
+      escapeTicket = { ticket: started.ticket, expiresAt: Date.now() + 5 * 60_000, subjectId: subject.id };
+    }
+    renderEscapeTicket();
+    showMenuGuide(buildPlan(started.ticket));
+  } else if (inApp && escapeTicket === null) {
+    void prepareEscapeTicket().catch((e) => record(`券を用意できなかった: ${String(e)}`));
+  }
   if (load(PREP_AT_LOAD_KEY, false)) await prepareHomeScreen();
 }
 

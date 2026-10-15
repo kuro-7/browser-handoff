@@ -25,6 +25,8 @@
       --warn: #a3520b;
       --warn-bg: #fdf0e1;
       --code-bg: #f0f2f5;
+      --ng: #b42318;
+      --ng-bg: #fdecea;
     }
     @media (prefers-color-scheme: dark) {
       :root {
@@ -40,6 +42,8 @@
         --warn: #f0b070;
         --warn-bg: #352512;
         --code-bg: #24282e;
+        --ng: #f59a8f;
+        --ng-bg: #3a1a17;
       }
     }
     * { box-sizing: border-box; }
@@ -51,14 +55,16 @@
       padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
     }
     main { max-width: 640px; margin: 0 auto; padding: 16px; }
-    h1 { font-size: 20px; margin: 8px 0 4px; }
-    h2 { font-size: 17px; margin: 0 0 8px; }
+    h1 { font-size: 15px; color: var(--muted); font-weight: 600; margin: 4px 0 12px; }
+    h2 { font-size: 19px; margin: 0 0 10px; }
+    h3 { font-size: 15px; margin: 20px 0 6px; padding-top: 12px; border-top: 1px solid var(--line); }
     p { margin: 0 0 8px; }
-    .lead { color: var(--muted); font-size: 14px; margin-bottom: 16px; }
-    section { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin-bottom: 16px; }
-    .tag { display: inline-block; font-size: 12px; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 0 8px; margin-left: 6px; vertical-align: 2px; }
-    .summary { font-size: 18px; font-weight: 600; margin-bottom: 8px; }
+    section { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px; margin-bottom: 14px; }
+    .hero { background: transparent; border: none; padding: 0 2px; }
+    .hero .place { font-size: 22px; font-weight: 700; line-height: 1.35; margin-bottom: 6px; }
+    .id-chip { display: inline-block; font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 2px 10px; }
     .note { color: var(--muted); font-size: 14px; }
+    .field { color: var(--muted); font-size: 14px; margin: 14px 0 6px; }
     dl { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; margin: 8px 0; font-size: 14px; }
     dt { color: var(--muted); }
     dd { margin: 0; overflow-wrap: anywhere; }
@@ -68,21 +74,29 @@
       font: inherit; border-radius: 10px; border: 1px solid var(--line); background: var(--card); color: var(--text); padding: 8px 12px;
     }
     button { cursor: pointer; }
-    button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; width: 100%; padding: 12px; font-size: 17px; }
+    button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 700; width: 100%; padding: 14px; font-size: 18px; }
+    button.secondary { border-color: var(--accent); color: var(--accent); font-weight: 600; }
     button:disabled { opacity: .5; }
     .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0; }
     .row > input[type="text"] { flex: 1 1 180px; min-width: 0; }
     select { max-width: 100%; }
-    label.field { display: block; font-size: 14px; color: var(--muted); margin-top: 8px; }
-    .big-id { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 28px; font-weight: 700; letter-spacing: .05em; }
-    .result { border-radius: 10px; padding: 10px 12px; margin-top: 12px; }
-    .result.ok { background: var(--ok-bg); color: var(--ok); }
-    .result.warn { background: var(--warn-bg); color: var(--warn); }
-    .result.plain { background: var(--code-bg); }
-    .result:empty { display: none; }
+    .status { border-radius: 12px; padding: 12px 14px; margin-top: 12px; background: var(--code-bg); }
+    .status p:last-child { margin-bottom: 0; }
+    .status-title { font-size: 19px; font-weight: 700; }
+    .status.ok { background: var(--ok-bg); }
+    .status.ok .status-title { color: var(--ok); }
+    .status.warn { background: var(--warn-bg); }
+    .status.warn .status-title { color: var(--warn); }
+    .status.ng { background: var(--ng-bg); }
+    .status.ng .status-title { color: var(--ng); }
+    .status.ok .status-title::before { content: "✓ "; }
+    .status.ng .status-title::before { content: "× "; }
+    .status.warn .status-title::before { content: "! "; }
+    .menu-words { font-size: 18px; font-weight: 700; background: var(--card); border-radius: 8px; padding: 8px 10px; }
     .chips { display: flex; flex-wrap: wrap; gap: 6px; }
-    .chips button { font-size: 14px; padding: 6px 10px; border-radius: 999px; }
-    ol.signals { margin: 6px 0 0; padding-left: 20px; font-size: 14px; }
+    .chips button { font-size: 14px; padding: 6px 12px; border-radius: 999px; }
+    details > summary { cursor: pointer; font-weight: 600; padding: 4px 0; }
+    section > details > summary { font-size: 16px; }
     textarea { width: 100%; min-height: 160px; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background: var(--code-bg); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
     .log { max-height: 320px; overflow: auto; font-size: 12px; }
     .log div { padding: 3px 0; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
@@ -92,7 +106,6 @@
 <body>
   <main>
     <h1>browser-handoff デモ</h1>
-    <p class="lead">キットを実機で確かめるためのページです。押したことと結果は下の「記録」に残るので、最後にコピーして送ってください。</p>
     <div id="app"><p>読み込み中…</p></div>
   </main>
   <script type="module" src="/app.js"></script>
