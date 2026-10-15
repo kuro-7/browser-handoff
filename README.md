@@ -42,7 +42,7 @@ const flow = createEscapeFlow(
 button.onclick = () => void flow.press(); // クリックの処理の中で、待たずに呼ぶ
 ```
 
-React なら `useSyncExternalStore(flow.subscribe, flow.getState)` でそのまま使える（状態が変わったときだけ別のオブジェクトになる）。`owner`・`resume` が変わったら作り直し、外すときに `dispose` する。
+React なら `useSyncExternalStore(flow.subscribe, flow.getState)` でそのまま使える（状態が変わったときだけ別のオブジェクトになる）。`owner`・`resume` が変わったら作り直し、外すときに `dispose` する。作るのは `useEffect` の中で行い、できた流れを state に置く（`useMemo` や `useState` の初期化で作って `useEffect` の後始末で `dispose` すると、開発時の StrictMode で捨てた流れが残り、押しても何も起きない）。
 
 外のブラウザで開くのは、既定では今のページから query と hash を除いた URL（流入の `utm_*` を引き継がないため）。query で画面の状態を持つページなら、`targetUrl` で渡す。
 

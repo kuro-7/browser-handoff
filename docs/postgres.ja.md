@@ -25,7 +25,7 @@ create index handoff_tickets_live on handoff_tickets (subject_id, purpose, issue
 -- サーバーの鍵（service role）からだけ触る。Supabase は public の表を anon・authenticated にも見せるので外す。
 alter table handoff_tickets enable row level security;
 revoke all privileges on table handoff_tickets from anon, authenticated;
-grant select, insert, update on table handoff_tickets to service_role;
+grant select, insert, update on table handoff_tickets to service_role; -- 古い券を消す delete を回すなら delete も足す
 ```
 
 `revokeBySubject`（新しい順に N 枚残して、残りを期限切れにする）は、REST だと「読む→書く」の2回になり原子的でない。関数にして1回で済ませる。
