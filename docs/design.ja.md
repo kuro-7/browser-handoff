@@ -253,7 +253,7 @@ const memoryStore: () => HandoffStore; // テスト用
 
 ## 9. 未決
 
-- repo 名・パッケージ名（候補は README）。
+- repo 名・パッケージ名。仮に `browser-handoff`。他の候補は `carry-on`（「続きから」）、`storage-handoff`、`webview-escape-handoff`。
 - 公開するか（今は非公開。公開するなら MIT）。
 - 場所の判定を自前で書くか、`inapp-spy`（MIT）に頼るか。依存を増やさないなら自前（UA の表は小さい）。
 - 配布の形: npm の非公開パッケージか、GitHub の git 依存か。
