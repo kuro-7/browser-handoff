@@ -1,7 +1,7 @@
 import { decideRedemption, type RedemptionDecision } from '../core/redemption.js';
 import { DEFAULT_TICKET_PARAM, readTicket } from '../core/ticketUrl.js';
 import type { TicketLookup } from '../core/types.js';
-import { clearTicketFromAddressBar } from './addressBar.js';
+import { clearTicketFromAddressBar, isEscapePending } from './addressBar.js';
 
 /** 受け取りの流れでキットが呼ぶ、ホストの関数。 */
 export interface RedemptionHost<Credential> {
@@ -28,6 +28,16 @@ export interface StartRedemptionOptions extends TicketParamOptions {
   url?: string;
 }
 
+export interface StartRedemptionResult {
+  ticket: string;
+  decision: RedemptionDecision;
+  /**
+   * この券は、このページが `reloadWithTicket` で付けたもの（メニューの案内のために読み込み直した）。
+   * 受け取りはせず（decision は noop）、URL の券も消さない。ホストはメニューの案内をもう一度出す。
+   */
+  escapePending?: true;
+}
+
 /**
  * 起動時に呼ぶ。URL に引換券が無ければ null。
  * `adopt`・`choose` のときは、続けて `settleTicket` を呼ぶ（choose は利用者が選んだあと）。
@@ -35,10 +45,12 @@ export interface StartRedemptionOptions extends TicketParamOptions {
 export async function startRedemption<C>(
   host: RedemptionHost<C>,
   opts: StartRedemptionOptions = {},
-): Promise<{ ticket: string; decision: RedemptionDecision } | null> {
+): Promise<StartRedemptionResult | null> {
   const param = opts.param ?? DEFAULT_TICKET_PARAM;
   const ticket = readTicket(opts.url ?? location.href, param);
   if (ticket === null) return null;
+  // メニューから開いてもらうために、このページ自身が付けた券。消すとメニューから届かなくなる。
+  if (isEscapePending(ticket)) return { ticket, decision: { action: 'noop' }, escapePending: true };
 
   // ホーム画面アプリはアイコンを押すたびに同じ引換券で開く。決着済みなら照会もしない。
   if (host.wasNotified(ticket)) {

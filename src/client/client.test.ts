@@ -6,7 +6,7 @@ import {
   clearTicketFromAddressBar,
   escapeToBrowser,
   overrideManifest,
-  putTicketInAddressBar,
+  reloadWithTicket,
   settleTicket,
   startRedemption,
   type RedemptionHost,
@@ -75,9 +75,18 @@ describe('address bar', () => {
     history.replaceState(null, '', 'https://example.com/play?x=1');
   });
 
-  it('引換券を付けて、消す', () => {
-    putTicketInAddressBar(TICKET);
-    expect(location.href).toBe(`https://example.com/play?x=1&handoff=${TICKET}`);
+  afterEach(() => {
+    sessionStorage.clear();
+  });
+
+  it('引換券付きの URL で読み込み直す', () => {
+    const navigate = vi.fn();
+    reloadWithTicket(TICKET, { navigate });
+    expect(navigate).toHaveBeenCalledWith(`https://example.com/play?x=1&handoff=${TICKET}`);
+  });
+
+  it('URL から引換券を消す', () => {
+    history.replaceState(null, '', `https://example.com/play?x=1&handoff=${TICKET}`);
     clearTicketFromAddressBar();
     expect(location.href).toBe('https://example.com/play?x=1');
   });
@@ -132,6 +141,18 @@ describe('startRedemption / settleTicket', () => {
 
   beforeEach(() => {
     history.replaceState(null, '', `https://example.com/play?handoff=${TICKET}`);
+  });
+
+  it('メニューのために読み込み直したページでは、受け取らずに券を残す', async () => {
+    reloadWithTicket(TICKET, { navigate: (href) => history.replaceState(null, '', href) });
+    const { host } = fakeHost({});
+    expect(await startRedemption(host)).toEqual({ ticket: TICKET, decision: { action: 'noop' }, escapePending: true });
+    expect(host.peek).not.toHaveBeenCalled();
+    expect(location.href).toContain('handoff=');
+    // ボタン1つで開けたなどで URL から消したら、印も消える。
+    clearTicketFromAddressBar();
+    history.replaceState(null, '', `https://example.com/play?handoff=${TICKET}`);
+    expect((await startRedemption(host))?.escapePending).toBeUndefined();
   });
 
   it('引換券が無ければ null', async () => {
