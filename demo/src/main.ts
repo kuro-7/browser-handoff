@@ -623,14 +623,19 @@ function watchArrival(plan: EscapePlan, ticket: Issued): void {
     document.removeEventListener('visibilitychange', onVisibility);
     watchingArrival = false;
   };
+  let checking = false;
   const check = async () => {
-    if (visibleSince === null) return; // 裏にいる間は聞かない
+    if (visibleSince === null || checking || !watchingArrival) return; // 裏にいる間・照会中は聞かない
+    checking = true;
     let res: TicketLookup;
     try {
       res = await api<TicketLookup>('peek', { ticket: ticket.ticket });
     } catch {
       return;
+    } finally {
+      checking = false;
     }
+    if (!watchingArrival) return;
     if (res.status === 'valid') {
       // まだ使われていない。戻ってきてしばらく経っても使われていなければ、届いていない。
       if (visibleSince !== null && Date.now() - visibleSince >= ARRIVAL_WAIT_MS) {
