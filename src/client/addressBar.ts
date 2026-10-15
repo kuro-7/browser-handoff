@@ -1,3 +1,4 @@
+import { LINE_EXTERNAL_PARAM } from '../core/escape.js';
 import { DEFAULT_TICKET_PARAM, withTicket, withoutTicket } from '../core/ticketUrl.js';
 
 /**
@@ -8,8 +9,13 @@ export function putTicketInAddressBar(ticket: string, param: string = DEFAULT_TI
   history.replaceState(history.state, '', withTicket(location.href, ticket, param));
 }
 
-/** 今のページの URL から引換券を消す。ボタン1つで開けたとき、受け取ったとき、捨てたときに呼ぶ。 */
+/**
+ * 今のページの URL から引換券を消す。ボタン1つで開けたとき、受け取ったとき、捨てたときに呼ぶ。
+ * LINE で開き直すときに付けた `openExternalBrowser=1` も一緒に消す。
+ */
 export function clearTicketFromAddressBar(param: string = DEFAULT_TICKET_PARAM): void {
-  const next = withoutTicket(location.href, param);
+  const url = new URL(withoutTicket(location.href, param));
+  url.searchParams.delete(LINE_EXTERNAL_PARAM);
+  const next = url.href;
   if (next !== location.href) history.replaceState(history.state, '', next);
 }

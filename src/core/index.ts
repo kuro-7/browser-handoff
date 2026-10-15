@@ -9,7 +9,7 @@ export type {
   TicketStatus,
 } from './types.js';
 export { detectContext, type ContextEnv } from './context.js';
-export { planEscape, type EscapeFallback, type EscapePlan, type EscapeStep, type MenuHint } from './escape.js';
+export { LINE_EXTERNAL_PARAM, planEscape, type EscapeFallback, type EscapePlan, type EscapeStep, type MenuHint } from './escape.js';
 export {
   decideRedemption,
   type NotifyReason,

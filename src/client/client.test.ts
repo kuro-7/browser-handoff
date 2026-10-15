@@ -81,6 +81,12 @@ describe('address bar', () => {
     clearTicketFromAddressBar();
     expect(location.href).toBe('https://example.com/play?x=1');
   });
+
+  it('LINE の openExternalBrowser も一緒に消す', () => {
+    history.replaceState(null, '', `https://example.com/play?x=1&handoff=${TICKET}&openExternalBrowser=1`);
+    clearTicketFromAddressBar();
+    expect(location.href).toBe('https://example.com/play?x=1');
+  });
 });
 
 describe('overrideManifest', () => {

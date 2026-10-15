@@ -118,7 +118,7 @@ describe('planEscape', () => {
     });
     expect(planEscape(inApp('android', 'line'), target).fallback.menu).toEqual({
       opener: 'more',
-      item: 'open-in-other-app',
+      item: 'open-in-browser',
     });
     expect(planEscape(inApp('ios', 'tiktok'), target).fallback.menu).toBeNull();
   });
