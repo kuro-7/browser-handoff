@@ -94,3 +94,7 @@ npm run check
 ```bash
 npm run build
 ```
+
+## ライセンス
+
+[MIT](LICENSE)

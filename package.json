@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.0.0",
   "description": "Carry an anonymous web-app account across storage partitions (in-app browser -> browser, iOS Safari -> home-screen app) without login.",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "type": "module",
   "sideEffects": false,
   "exports": {
