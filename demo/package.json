@@ -1,0 +1,17 @@
+{
+  "name": "browser-handoff-demo",
+  "private": true,
+  "type": "module",
+  "description": "実機確認用のデモページ（設計書 8章）。キットを ../src から直接読む。",
+  "scripts": {
+    "build": "esbuild src/main.ts --bundle --format=esm --target=es2020 --outfile=public/app.js",
+    "dev": "npm run build && wrangler pages dev public --kv HANDOFF_KV --port 8788",
+    "check": "tsc --noEmit -p .",
+    "deploy": "npm run build && wrangler pages deploy public"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2",
+    "typescript": "~6.0.2",
+    "wrangler": "4.147.0"
+  }
+}
