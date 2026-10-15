@@ -74,7 +74,7 @@ flowchart LR
 | A2（iOS・アプリのメニュー） | A1 が効かなかったとき、またはアプリに手段が無いとき、`fallback: menu` とアプリ名を返す。ホストはメニューの場所（下の表）を案内し、そのとき引換券付きの URL で読み込み直す（`reloadWithTicket`）。メニューから開いても届く |
 | A3（Android） | Custom Tabs 型と分かれば `storage: shared` を返し、引換券を出さない |
 | A4（Android・ボタン1つ） | `intent://…#Intent;scheme=https;end` で既定のブラウザを開く（X は `intent://` を開けないので除き、メニューに任せる）。A1 と同じく、ボタンのクリックの処理の中で呼ぶ |
-| A5（Android・アプリのメニュー） | A2 と同じ |
+| A5（Android・アプリのメニュー） | A2 と同じ。ただし Android の Instagram はメニューでは券が届かないので、`fallback: retry` を返し、ホストは「もう一度ボタンを押して『次へ』」と案内する |
 | B1（iOS・Mac の Safari） | 追加の手順を出すときに引換券（`home-screen`）を発行し、`<link rel="manifest">` を引換券付きの URL に差し替える。サーバーは `start_url` に引換券を入れた manifest を返す。アプリの初回起動で受け取る。追加してから初めて開くまでに日が空くことがあるので、期限は長くする（6章） |
 | B2 | 届かなかったと分かったら（初回起動で端末に主体が無く、引換券も無い）、`fallback: host-login` を返す。ログインはホストの仕事 |
 | B3・B4 | `storage: shared` を返し、何もしない。追加のダイアログは pwa-install などに任せる（キットの範囲外） |
@@ -102,7 +102,7 @@ flowchart LR
 - LINE: `openExternalBrowser=1` で Chrome が開き、届いた。確認の画面は出なかった
 - X: `intent://` で X が「このアクションを実行できるアプリはありません」を出した（X の WebView は `intent://` を解釈しない）。案内のとおりメニューから開くと届いた。`googlechrome://navigate?url=` も試したが、何も起きなかった。そのため Android の X では自動で開かず（`step: none`）、ボタンを押したらすぐメニューの案内にする
 - Instagram: `intent://` で Instagram が「アプリから退出しようとしています…このまま続けますか？」を出し、「次へ」で Chrome が開いて届いた。1回余分に押すことになる（Instagram の画面なので避けられない）。確認が出ている間は合図が来ないので、既定の 2.5 秒では「次へ」を押す前に fallback になり、届いたのに案内が出た。そのため `planEscape` は Android の Instagram で `graceMs: 10000` を返す
-- Instagram のメニュー（「⋮」→「Chrome で開く」）は、`reloadWithTicket` で読み込み直したあとでも、最初に開いたリンクの URL を渡す。券は届かない（2回試して2回とも券なし）。Android の Instagram ではメニューは代わりにならない。ボタンが効かなかったとき（確認で「キャンセル」を押したなど）は、もう一度ボタンを押して「次へ」を選んでもらうのがよい（未決: キットの `fallback` で表すか）
+- Instagram のメニュー（「⋮」→「Chrome で開く」）は、`reloadWithTicket` で読み込み直したあとでも、最初に開いたリンクの URL を渡す。券は届かない（2回試して2回とも券なし）。Android の Instagram ではメニューは代わりにならない。ボタンが効かなかったとき（確認で「キャンセル」を押したなど）は、`planEscape` が `fallback: { kind: 'retry' }` を返し、ホストは「もう一度ボタンを押して『次へ』」と案内する（読み込み直さない）
 
 **Android のホーム画面アプリ**: ホーム画面に追加したアプリ（WebAPK）は、そのサイトの URL を引き取る。外のブラウザを開いたつもりでも、追加済みならホーム画面アプリが開く。Chrome と保存領域が同じなので、引換券が届けば困らない。
 
@@ -196,7 +196,9 @@ interface MenuHint {
 }
 interface EscapePlan {
   step: EscapeStep;
-  fallback: { kind: 'menu'; app: InAppName; platform: Platform; menu: MenuHint | null };
+  fallback:
+    | { kind: 'menu'; app: InAppName; platform: Platform; menu: MenuHint | null } // メニューから開いてもらう（reloadWithTicket してから）
+    | { kind: 'retry'; app: InAppName; platform: Platform };                     // メニューでは届かない。もう一度ボタンを押してもらう（Android の Instagram）
   graceMs?: number; // 合図を待つ時間の目安。開く前にアプリが確認を出すとき長め（Android の Instagram は 10 秒）
 }
 function planEscape(context: BrowserContext, targetUrl: string): EscapePlan;

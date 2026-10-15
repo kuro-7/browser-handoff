@@ -16,13 +16,23 @@ export interface MenuHint {
   item: 'open-in-browser' | 'open-in-other-app';
 }
 
-export interface EscapeFallback {
-  kind: 'menu';
-  app: InAppName;
-  platform: Platform;
-  /** 分からない、またはメニューが無いときは null。 */
-  menu: MenuHint | null;
-}
+/** ボタン1つで開けなかったときの代わり。 */
+export type EscapeFallback =
+  /**
+   * アプリのメニューから開いてもらう。ホストは `reloadWithTicket` で券付きの URL に読み込み直してから案内する。
+   */
+  | {
+      kind: 'menu';
+      app: InAppName;
+      platform: Platform;
+      /** 分からない、またはメニューが無いときは null。 */
+      menu: MenuHint | null;
+    }
+  /**
+   * メニューでは券が届かない（最初に開いたリンクの URL を渡すアプリ）。
+   * もう一度ボタンを押して、アプリが出す確認で進んでもらう。読み込み直さなくてよい。
+   */
+  | { kind: 'retry'; app: InAppName; platform: Platform };
 
 export interface EscapePlan {
   step: EscapeStep;
@@ -58,14 +68,17 @@ const MENU_HINTS: Partial<Record<Platform, Partial<Record<InAppName, MenuHint>>>
 };
 
 /** 外のブラウザの開き方を決める。実行は client の `escapeToBrowser`。 */
+// メニューが最初に開いたリンクの URL を渡すので、券が届かないアプリ（2026-10-16 確認）。
+// Android の Instagram は「⋮」→「Chrome で開く」が、読み込み直したあとでも最初のリンクを渡す。
+function menuDropsTicket(platform: Platform, app: InAppName): boolean {
+  return platform === 'android' && app === 'instagram';
+}
+
 export function planEscape(context: BrowserContext, targetUrl: string): EscapePlan {
   const app = context.app ?? 'other';
-  const fallback: EscapeFallback = {
-    kind: 'menu',
-    app,
-    platform: context.platform,
-    menu: MENU_HINTS[context.platform]?.[app] ?? null,
-  };
+  const fallback: EscapeFallback = menuDropsTicket(context.platform, app)
+    ? { kind: 'retry', app, platform: context.platform }
+    : { kind: 'menu', app, platform: context.platform, menu: MENU_HINTS[context.platform]?.[app] ?? null };
   if (context.kind !== 'in-app') return { step: { kind: 'none' }, fallback };
   const step = escapeStep(context.platform, app, new URL(targetUrl));
   if (step.kind === 'navigate' && context.platform === 'android' && app === 'instagram') {

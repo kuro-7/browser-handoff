@@ -399,14 +399,21 @@ function buildPlan(ticket: string): EscapePlan {
   const real = planEscape(context, target);
   const method = METHODS.find((m) => m.id === methodSelect.value) ?? METHODS[0]!;
   if (method.as === undefined) return real;
-  if (method.as === null) return { step: { kind: 'none' }, fallback: real.fallback };
+  // 「手段なし」はメニューの練習なので、代わりはいつもメニューにする。
+  if (method.as === null) {
+    const { app, platform } = real.fallback;
+    const fallback = real.fallback.kind === 'menu' ? real.fallback : { kind: 'menu' as const, app, platform, menu: null };
+    return { step: { kind: 'none' }, fallback };
+  }
   const as: BrowserContext = { platform: method.as.platform, kind: 'in-app', app: method.as.app, storage: 'separate' };
   // 開き方だけ借りて、メニューの案内は今のアプリのものを使う。
   return { step: planEscape(as, target).step, fallback: real.fallback };
 }
 
 function menuWords(plan: EscapePlan): string {
-  return describeMenu(plan.fallback.app, plan.fallback.platform, plan.fallback.menu);
+  const f = plan.fallback;
+  if (f.kind === 'retry') return `もう一度ボタンを押して、${APP_NAMES[f.app]} の確認で「次へ」を選ぶ（メニューでは届かない）`;
+  return describeMenu(f.app, f.platform, f.menu);
 }
 
 function renderPlan(): void {
@@ -423,7 +430,7 @@ function renderPlan(): void {
     planView,
     dl([
       ['開き方', plan.step.kind === 'navigate' ? h('code', {}, maskUrl(plan.step.href)) : 'なし（メニューから開いてもらう）'],
-      ['メニュー', menuWords(plan)],
+      ['だめなとき', menuWords(plan)],
     ]),
   );
 }
@@ -572,6 +579,18 @@ async function onEscapeClick(): Promise<void> {
     fill(
       escapeResult,
       status('ok', '外のブラウザが開いたようです', '開いた先の画面に「届きました」と出ているか見てください。', h('p', { class: 'note' }, `最初の合図: ${first ?? '—'}`)),
+    );
+  } else if (plan.fallback.kind === 'retry') {
+    // メニューでは届かないアプリ。読み込み直さず、同じ券のままもう一度押してもらう。
+    record('もう一度押してもらう案内を出した（retry）');
+    fill(
+      escapeResult,
+      status(
+        'warn',
+        '開けませんでした',
+        h('p', {}, 'もう一度ボタンを押して、確認の画面で「次へ」を選んでください。'),
+        h('p', { class: 'note' }, 'このアプリはメニューから開くと届かないので、ボタンから開いてください。'),
+      ),
     );
   } else {
     // ボタンが効かなかった。メニューから開いても届くように、券付きの URL で読み込み直す。
