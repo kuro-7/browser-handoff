@@ -380,14 +380,29 @@ function watchSignals(t0: number): { first: () => string | null; stop: () => voi
     signalList.append(h('li', {}, line));
     record(`合図: ${line}`);
   };
-  const onVisibility = () => add(`visibilitychange → ${document.visibilityState}`);
+  // Android は裏に回ったページのタイマーを止めずに1秒ごとに動かすので、遅れが続けて来る。
+  // 続いている間は最初の1回だけ書き、戻ってきたときに回数をまとめて書く。
+  let stalls = 0;
+  const flushStalls = () => {
+    if (stalls > 1) add(`（タイマーの遅れはその間に計 ${stalls} 回）`);
+    stalls = 0;
+  };
+  const onVisibility = () => {
+    if (document.visibilityState === 'visible') flushStalls();
+    add(`visibilitychange → ${document.visibilityState}`);
+  };
   const onPageHide = (e: PageTransitionEvent) => add(`pagehide${e.persisted ? '（bfcache）' : ''}`);
   const onPageShow = (e: PageTransitionEvent) => add(`pageshow${e.persisted ? '（bfcache から戻った）' : ''}`);
   const onBlur = () => add('blur');
   const onFocus = () => add('focus');
   const ticker = window.setInterval(() => {
     const gap = Date.now() - lastTick;
-    if (gap >= 900) add(`タイマーが ${gap}ms 遅れた`);
+    if (gap >= 900) {
+      if (stalls === 0) add(`タイマーが ${gap}ms 遅れた`);
+      stalls += 1;
+    } else if (stalls > 0 && document.visibilityState === 'visible') {
+      flushStalls();
+    }
     lastTick = Date.now();
   }, 250);
   document.addEventListener('visibilitychange', onVisibility);
@@ -396,6 +411,7 @@ function watchSignals(t0: number): { first: () => string | null; stop: () => voi
   window.addEventListener('blur', onBlur);
   window.addEventListener('focus', onFocus);
   const stop = () => {
+    flushStalls();
     window.clearInterval(ticker);
     document.removeEventListener('visibilitychange', onVisibility);
     window.removeEventListener('pagehide', onPageHide);
