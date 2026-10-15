@@ -286,9 +286,35 @@ function fill(el: HTMLElement, ...children: Child[]): void {
 function dl(rows: Array<[string, Child]>): HTMLDListElement {
   return h('dl', {}, ...rows.flatMap(([k, v]) => [h('dt', {}, k), h('dd', {}, v)]));
 }
+// 結果の見出しごとの、言語に頼らない名前。実機の自動テスト（device/run.py）は文言ではなくこの id で読む。
+const STATUS_IDS: Record<string, string> = {
+  '券を発行できませんでした': 'issue-failed',
+  '開いています…': 'opening',
+  '外のブラウザに移ったようです': 'checking',
+  '届きました': 'arrived',
+  '届いたか分かりませんでした': 'unknown',
+  'ボタンでは開けませんでした': 'button-failed',
+  'まだ届いていません': 'not-arrived',
+  'メニューから開いてください': 'menu-guide',
+  '受け取りに失敗しました': 'receive-failed',
+  '受け取りの確認に失敗しました': 'receive-failed',
+  'メニューから開いてもらう途中です': 'menu-pending',
+  '券なしで開きました': 'no-ticket',
+  '受け取っています…': 'receiving',
+  '届きました。どちらを使うか選んでください': 'choose',
+  '券は届きましたが、使えませんでした': 'notify',
+  '用意できました': 'home-ready',
+  '用意できませんでした': 'home-failed',
+};
+
 /** 結果の大きな表示。tone は ok（うまくいった）・warn（要注意）・ng（だめ）・plain。 */
 function status(tone: 'ok' | 'warn' | 'ng' | 'plain', title: string, ...body: Child[]): HTMLElement {
-  return h('div', { class: `status ${tone}` }, h('p', { class: 'status-title' }, title), ...body.map((b) => (typeof b === 'string' ? h('p', {}, b) : b)));
+  return h(
+    'div',
+    { class: `status ${tone}` },
+    h('p', { class: 'status-title', id: `status-${STATUS_IDS[title] ?? 'other'}` }, title),
+    ...body.map((b) => (typeof b === 'string' ? h('p', {}, b) : b)),
+  );
 }
 
 // ---------- 今の場所 ----------
@@ -374,7 +400,7 @@ const methodSelect = h('select', { id: 'method' }, ...METHODS.map((m) => h('opti
 const graceInput = h('input', { type: 'number', placeholder: '自動', min: '0', step: '100', inputmode: 'numeric', style: 'width:7em' });
 const planView = h('div');
 const ticketView = h('span', { class: 'note' });
-const escapeButton = h('button', { class: 'primary' }, '外のブラウザで開く');
+const escapeButton = h('button', { class: 'primary', id: 'escape-button' }, '外のブラウザで開く');
 const escapeResult = h('div');
 const escapeIntro = h('p');
 
@@ -802,8 +828,8 @@ async function runRedemption(): Promise<StartRedemptionResult | null> {
         const buttons = h(
           'div',
           { class: 'row' },
-          h('button', { onclick: () => void settle(ticket, 'take') }, '券のアカウントにする'),
-          h('button', { onclick: () => void settle(ticket, 'keep') }, '今のまま'),
+          h('button', { id: 'choose-take', onclick: () => void settle(ticket, 'take') }, '券のアカウントにする'),
+          h('button', { id: 'choose-keep', onclick: () => void settle(ticket, 'keep') }, '今のまま'),
         );
         fill(
           receiveView,
@@ -865,7 +891,7 @@ function homeCard(): HTMLElement {
     {},
     h('h2', {}, 'ホーム画面に追加'),
     h('p', {}, '① 下のボタンを押す ② 共有 →「ホーム画面に追加」③ 追加したアイコンから開いて、「届きました」と出るか見る。翌日以降に初めて開くのも試してください。'),
-    h('button', { class: 'primary', onclick: () => void prepareHomeScreen() }, 'ホーム画面用の券を用意する'),
+    h('button', { class: 'primary', id: 'home-button', onclick: () => void prepareHomeScreen() }, 'ホーム画面用の券を用意する'),
     homeView,
   );
 }
@@ -1030,7 +1056,7 @@ async function main(): Promise<void> {
 
   fill(
     app,
-    h('section', { class: 'hero' }, h('p', { class: 'place' }, describePlace(context)), h('p', {}, mainHint()), idChip),
+    h('section', { class: 'hero' }, h('p', { class: 'place', id: `place-${context.kind}` }, describePlace(context)), h('p', {}, mainHint()), idChip),
     inApp ? escapeCard() : receiveCard(),
     inApp ? null : homeMain ? homeCard() : null,
     logCard(),
