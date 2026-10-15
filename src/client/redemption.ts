@@ -66,6 +66,17 @@ export async function startRedemption<C>(
     notifiedBefore: false,
   });
 
+  if (decision.action === 'noop' && lookup.status === 'valid') {
+    // もう同じ主体がいる（図2の D1）。券の役目は済んだので使用済みにする。
+    // 元のページは券が使用済みになったかを照会して、外のブラウザに届いたかを確かめられる
+    // （合図だけでは、ほかのアプリに切り替えたのと見分けられない）。
+    try {
+      await host.discard?.(ticket);
+    } catch {
+      // 使用済みにできなくても、この端末の受け取りには関係しない。
+    }
+    host.markNotified(ticket);
+  }
   if (decision.action === 'notify') host.markNotified(ticket);
   if (decision.action === 'noop' || decision.action === 'notify') clearTicketFromAddressBar(param);
   return { ticket, decision };

@@ -538,6 +538,8 @@ function showMenuGuide(plan: EscapePlan): void {
 async function onEscapeClick(): Promise<void> {
   const t0 = Date.now();
   stopWatching?.();
+  window.clearInterval(arrivalTimer);
+  watchingArrival = false;
   const method = methodSelect.value;
   // 空なら計画の目安（Instagram は長め）、それも無ければキットの既定。
   const graceMs = Number(graceInput.value) || undefined;
@@ -573,31 +575,84 @@ async function onEscapeClick(): Promise<void> {
 
   if (result === 'opened') {
     clearTicketFromAddressBar();
-    // 外のブラウザがこの券を受け取る前に新しい券を発行すると、escape は古い券を無効にするので届かなくなる。
-    // 次の券は、次に押したとき（または「券を用意し直す」）に作る。
-    forgetEscapeTicket();
-    fill(
-      escapeResult,
-      status('ok', '外のブラウザが開いたようです', '開いた先の画面に「届きました」と出ているか見てください。', h('p', { class: 'note' }, `最初の合図: ${first ?? '—'}`)),
-    );
-  } else if (plan.fallback.kind === 'retry') {
+    fill(escapeResult, status('plain', '外のブラウザに移ったようです', '届いたか確かめています…', h('p', { class: 'note' }, `最初の合図: ${first ?? '—'}`)));
+    watchArrival(plan, ticket);
+  } else {
+    showFallback(plan, ticket, 'ボタンでは開けませんでした');
+  }
+}
+
+/** ボタンで届かなかったときの代わり。retry はもう一度押してもらい、menu は読み込み直してメニューを案内する。 */
+function showFallback(plan: EscapePlan, ticket: Issued, title: string): void {
+  if (plan.fallback.kind === 'retry') {
     // メニューでは届かないアプリ。読み込み直さず、同じ券のままもう一度押してもらう。
-    record('もう一度押してもらう案内を出した（retry）');
+    record(`もう一度押してもらう案内を出した（retry）: ${title}`);
     fill(
       escapeResult,
       status(
         'warn',
-        '開けませんでした',
+        title,
         h('p', {}, 'もう一度ボタンを押して、確認の画面で「次へ」を選んでください。'),
         h('p', { class: 'note' }, 'このアプリはメニューから開くと届かないので、ボタンから開いてください。'),
       ),
     );
-  } else {
-    // ボタンが効かなかった。メニューから開いても届くように、券付きの URL で読み込み直す。
-    // 読み込み直したあとは startRedemption が escapePending を返すので、そこで案内を出す。
-    record(`メニューのために、券付きの URL で読み込み直す: ${maskUrl(withTicket(location.href, ticket.ticket))}`);
-    reloadWithTicket(ticket.ticket);
+    return;
   }
+  // メニューから開いても届くように、券付きの URL で読み込み直す。
+  // 読み込み直したあとは startRedemption が escapePending を返すので、そこで案内を出す。
+  record(`メニューのために、券付きの URL で読み込み直す: ${maskUrl(withTicket(location.href, ticket.ticket))}（${title}）`);
+  reloadWithTicket(ticket.ticket);
+}
+
+// 合図（ページが隠れた）だけでは、外のブラウザに移ったのか、ほかのアプリに切り替えたのか見分けられない。
+// そこで戻ってきたら、券が使用済みになったか（外のブラウザが受け取ったか）をサーバーに照会して確かめる。
+const ARRIVAL_WAIT_MS = 4_000;
+let arrivalTimer: number | undefined;
+let watchingArrival = false;
+
+function watchArrival(plan: EscapePlan, ticket: Issued): void {
+  window.clearInterval(arrivalTimer);
+  watchingArrival = true;
+  let visibleSince = document.visibilityState === 'visible' ? Date.now() : null;
+  const onVisibility = () => {
+    visibleSince = document.visibilityState === 'visible' ? Date.now() : null;
+  };
+  document.addEventListener('visibilitychange', onVisibility);
+  const stop = () => {
+    window.clearInterval(arrivalTimer);
+    document.removeEventListener('visibilitychange', onVisibility);
+    watchingArrival = false;
+  };
+  const check = async () => {
+    if (visibleSince === null) return; // 裏にいる間は聞かない
+    let res: TicketLookup;
+    try {
+      res = await api<TicketLookup>('peek', { ticket: ticket.ticket });
+    } catch {
+      return;
+    }
+    if (res.status === 'valid') {
+      // まだ使われていない。戻ってきてしばらく経っても使われていなければ、届いていない。
+      if (visibleSince !== null && Date.now() - visibleSince >= ARRIVAL_WAIT_MS) {
+        stop();
+        record('届いたかの確認: まだ使われていない（ほかのアプリに切り替えただけか、ブラウザが開かなかった）');
+        showFallback(plan, ticket, 'まだ届いていません');
+      }
+      return;
+    }
+    stop();
+    // 使われた（または切れた）券は、もう使い回せない。次に押すときのために新しい券を用意する。
+    forgetEscapeTicket();
+    void prepareEscapeTicket().catch((e) => record(`券を用意できなかった: ${String(e)}`));
+    if (res.status === 'used') {
+      record('届いたかの確認: 券が使用済みになった（外のブラウザが受け取った）');
+      fill(escapeResult, status('ok', '届きました', '外のブラウザが受け取りました。'));
+    } else {
+      record(`届いたかの確認: 券の状態 ${res.status}`);
+      fill(escapeResult, status('warn', '届いたか分かりませんでした', `券の状態: ${res.status}。もう一度ボタンを押してください。`));
+    }
+  };
+  arrivalTimer = window.setInterval(() => void check(), 1_500);
 }
 
 function escapeCard(): HTMLElement {
@@ -984,7 +1039,14 @@ async function main(): Promise<void> {
   restoreEscapeTicket();
   renderEscapeTicket();
   window.setInterval(() => {
-    if (escapeTicket) renderEscapeTicket();
+    if (!escapeTicket) return;
+    renderEscapeTicket();
+    // 期限が近ければ、押される前に作り直しておく（押してから発行を待つと、タップから時間が空いて Instagram が無視する）。
+    if (inApp && !watchingArrival && !preparing && escapeTicket.expiresAt - Date.now() < 60_000) {
+      record('券の期限が近いので作り直す');
+      forgetEscapeTicket();
+      void prepareEscapeTicket().catch((e) => record(`券を用意できなかった: ${String(e)}`));
+    }
   }, 1000);
 
   // 受け取りを先に済ませる（済む前に券を発行すると、別の ID で発行してしまう）。

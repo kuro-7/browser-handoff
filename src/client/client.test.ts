@@ -165,6 +165,13 @@ describe('startRedemption / settleTicket', () => {
     expect((await startRedemption(host))?.escapePending).toBeUndefined();
   });
 
+  it('同じ主体なら noop で、券を使用済みにする（元のページが届いたと分かるように）', async () => {
+    const { host, notified } = fakeHost({ device: { id: 'A', hasRecords: true } });
+    expect((await startRedemption(host))?.decision).toEqual({ action: 'noop' });
+    expect(host.discard).toHaveBeenCalledWith(TICKET);
+    expect(notified.has(TICKET)).toBe(true);
+  });
+
   it('引換券が無ければ null', async () => {
     history.replaceState(null, '', 'https://example.com/play');
     const { host } = fakeHost({});
