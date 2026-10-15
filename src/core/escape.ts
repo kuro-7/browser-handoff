@@ -80,6 +80,9 @@ function escapeStep(platform: Platform, app: InAppName, target: URL): EscapeStep
   }
 
   if (platform === 'android') {
+    // X の WebView は intent:// も googlechrome:// も開けない（2026-10-16 確認）。
+    // intent:// では X が「このアクションを実行できるアプリはありません」を出して利用者を不安にさせるので、メニューに任せる。
+    if (app === 'x') return { kind: 'none' };
     // 既定のブラウザで開く。
     const scheme = target.protocol.replace(/:$/, '');
     const rest = target.href.slice(target.protocol.length + 2); // "//" の後ろ

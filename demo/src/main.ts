@@ -284,8 +284,6 @@ interface Method {
   label: string;
   /** このアプリ・OS として planEscape に計画させる。null は「手段なし」。 */
   as?: { platform: Platform; app: InAppName } | null;
-  /** キットに無い開き方を試すとき。行き先の URL から移る先を作る。 */
-  href?: (target: string) => string;
 }
 const METHODS: Method[] = [
   { id: 'auto', label: '自動（今の場所の方法）' },
@@ -295,12 +293,6 @@ const METHODS: Method[] = [
   { id: 'ios-threads', label: 'barcelona://extbrowser（iOS の Threads の方法）', as: { platform: 'ios', app: 'threads' } },
   { id: 'line', label: 'openExternalBrowser=1（LINE の方法）', as: { platform: context.platform, app: 'line' } },
   { id: 'android', label: 'intent://（Android の方法）', as: { platform: 'android', app: 'other' } },
-  {
-    // キットにはまだ無い。Android の X で intent:// が「このアクションを実行できるアプリはありません」になったので試す。
-    id: 'android-chrome',
-    label: 'googlechrome://（Android の Chrome を指定、試し中）',
-    href: (target) => `googlechrome://navigate?url=${encodeURIComponent(target)}`,
-  },
 ];
 const METHOD_KEY = 'demo.method';
 const ESCAPE_TICKET_KEY = 'demo.escapeTicket';
@@ -316,6 +308,7 @@ const planView = h('div');
 const ticketView = h('span', { class: 'note' });
 const escapeButton = h('button', { class: 'primary' }, '外のブラウザで開く');
 const escapeResult = h('div');
+const escapeIntro = h('p');
 
 function forgetEscapeTicket(): void {
   escapeTicket = null;
@@ -337,7 +330,6 @@ function buildPlan(ticket: string): EscapePlan {
   const target = targetUrl(ticket);
   const real = planEscape(context, target);
   const method = METHODS.find((m) => m.id === methodSelect.value) ?? METHODS[0]!;
-  if (method.href) return { step: { kind: 'navigate', href: method.href(target) }, fallback: real.fallback };
   if (method.as === undefined) return real;
   if (method.as === null) return { step: { kind: 'none' }, fallback: real.fallback };
   const as: BrowserContext = { platform: method.as.platform, kind: 'in-app', app: method.as.app, storage: 'separate' };
@@ -351,6 +343,14 @@ function menuWords(plan: EscapePlan): string {
 
 function renderPlan(): void {
   const plan = buildPlan(escapeTicket?.ticket ?? 'AAAAAAAAAAAAAAAAAAAAAA');
+  const auto = plan.step.kind === 'navigate';
+  fill(escapeButton, auto ? '外のブラウザで開く' : 'ブラウザで開く方法を見る');
+  fill(
+    escapeIntro,
+    auto
+      ? 'ボタンを押してください。外のブラウザが開いて、そちらの画面に「届きました」と出れば成功です。'
+      : 'このアプリでは自動で開けません。ボタンを押すと、アプリのメニューから開く方法が出ます。',
+  );
   fill(
     planView,
     dl([
@@ -452,7 +452,7 @@ function showMenuGuide(plan: EscapePlan): void {
     escapeResult,
     status(
       'warn',
-      'ボタンでは開けませんでした',
+      plan.step.kind === 'none' ? 'メニューから開いてください' : 'ボタンでは開けませんでした',
       h('p', {}, 'アプリのメニューから開いてください:'),
       h('p', { class: 'menu-words' }, menuWords(plan)),
       '開いた先の画面に「届きました」と出れば成功です。メニューが違ったら、下の「見たこと」で教えてください。',
@@ -518,7 +518,7 @@ function escapeCard(): HTMLElement {
     'section',
     {},
     h('h2', {}, '外のブラウザで開く'),
-    h('p', {}, 'ボタンを押してください。外のブラウザが開いて、そちらの画面に「届きました」と出れば成功です。'),
+    escapeIntro,
     escapeButton,
     escapeResult,
   );

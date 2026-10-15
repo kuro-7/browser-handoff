@@ -73,7 +73,7 @@ flowchart LR
 | A1（iOS・ボタン1つ） | `planEscape` がアプリごとの開き方を返す（X・WhatsApp・Telegram などは `x-safari-https://`、Instagram は `instagram://extbrowser/`、Threads は `barcelona://extbrowser/`、LINE は `openExternalBrowser=1`）。ホストのボタンのクリックの処理の中で `escapeToBrowser` が実行し、開けたかを判定する |
 | A2（iOS・アプリのメニュー） | A1 が効かなかったとき、またはアプリに手段が無いとき、`fallback: menu` とアプリ名を返す。ホストはメニューの場所（下の表）を案内し、そのとき引換券付きの URL で読み込み直す（`reloadWithTicket`）。メニューから開いても届く |
 | A3（Android） | Custom Tabs 型と分かれば `storage: shared` を返し、引換券を出さない |
-| A4（Android・ボタン1つ） | `intent://…#Intent;scheme=https;end` で既定のブラウザを開く。A1 と同じく、ボタンのクリックの処理の中で呼ぶ |
+| A4（Android・ボタン1つ） | `intent://…#Intent;scheme=https;end` で既定のブラウザを開く（X は `intent://` を開けないので除き、メニューに任せる）。A1 と同じく、ボタンのクリックの処理の中で呼ぶ |
 | A5（Android・アプリのメニュー） | A2 と同じ |
 | B1（iOS・Mac の Safari） | 追加の手順を出すときに引換券（`home-screen`）を発行し、`<link rel="manifest">` を引換券付きの URL に差し替える。サーバーは `start_url` に引換券を入れた manifest を返す。アプリの初回起動で受け取る。追加してから初めて開くまでに日が空くことがあるので、期限は長くする（6章） |
 | B2 | 届かなかったと分かったら（初回起動で端末に主体が無く、引換券も無い）、`fallback: host-login` を返す。ログインはホストの仕事 |
@@ -100,7 +100,7 @@ flowchart LR
 **Android のボタン1つの実測（2026-10-16）**:
 
 - LINE: `openExternalBrowser=1` で Chrome が開き、届いた。確認の画面は出なかった
-- X: `intent://` で X が「このアクションを実行できるアプリはありません」を出した（X の WebView は `intent://` を解釈しない）。案内のとおりメニューから開くと届いた。利用者を不安にさせるので、Android の X では `intent://` を使わない。`googlechrome://navigate?url=` が効くかを確かめ中で、効かなければメニューの案内だけにする
+- X: `intent://` で X が「このアクションを実行できるアプリはありません」を出した（X の WebView は `intent://` を解釈しない）。案内のとおりメニューから開くと届いた。`googlechrome://navigate?url=` も試したが、何も起きなかった。そのため Android の X では自動で開かず（`step: none`）、ボタンを押したらすぐメニューの案内にする
 - Instagram: `intent://` で Instagram が「アプリから退出しようとしています…このまま続けますか？」を出し、「次へ」で Chrome が開いて届いた。1回余分に押すことになる（Instagram の画面なので避けられない）
 
 **Android のホーム画面アプリ**: ホーム画面に追加したアプリ（WebAPK）は、そのサイトの URL を引き取る。外のブラウザを開いたつもりでも、追加済みならホーム画面アプリが開く。Chrome と保存領域が同じなので、引換券が届けば困らない。

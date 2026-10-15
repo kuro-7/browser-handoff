@@ -100,8 +100,11 @@ describe('planEscape', () => {
     });
   });
 
+  it('Android X は自動で開かない（メニューに任せる）', () => {
+    expect(planEscape(inApp('android', 'x'), target).step).toEqual({ kind: 'none' });
+  });
+
   it.each<[InAppName, string]>([
-    ['x', 'intent://example.com/play?level=3#Intent;scheme=https;end'],
     ['instagram', 'intent://example.com/play?level=3#Intent;scheme=https;end'],
     ['other', 'intent://example.com/play?level=3#Intent;scheme=https;end'],
     ['line', 'https://example.com/play?level=3&openExternalBrowser=1'],
