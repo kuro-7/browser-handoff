@@ -45,7 +45,7 @@ GeoCutter の中に入るのは「つなぎ」だけになる: API の入口3本
 アプリ内ブラウザから出る道は2つある。利用者がリンクをコピーして貼り付ける必要は、どちらにも無い。
 
 - **ボタン1つ（A1・A4）**: ホストの画面のボタン（例「Safari で続きから遊ぶ」）を押すと、キットがアプリごとの方法で外のブラウザを開く。引換券はその URL に乗る。まずこちらを使う。
-- **アプリのメニュー（A2・A5）**: ボタンが効かなかったとき、またはアプリに自動で開く方法が無いときは、アプリ自身の「ブラウザで開く」メニューを使ってもらう。キットはアプリ名とメニューの場所のデータを返し、ホストがそれを案内する。案内を出すときに、今のページの URL に引換券を付ける（`putTicketInAddressBar`）。そのため、メニューから開いても券が届く。
+- **アプリのメニュー（A2・A5）**: ボタンが効かなかったとき、またはアプリに自動で開く方法が無いときは、アプリ自身の「ブラウザで開く」メニューを使ってもらう。キットはアプリ名とメニューの場所のデータを返し、ホストがそれを案内する。案内を出すときに、引換券付きの URL でページを読み込み直す（`reloadWithTicket`）。そのため、メニューから開いても券が届く。読み込み直すと画面の状態は消えるので、読み込み直したあとの `startRedemption` が「メニューの案内の途中」（`escapePending`）を返し、ホストは案内をもう一度出す。
 
 キットが返すのは状態だけで、文言はホストが決める（1章）。たとえば、ボタンを押してから結果が出るまでは `escapeToBrowser` が結果待ちになる。その間に「Safari を開いています…」のような表示を出すかどうかはホストが決める。
 
@@ -71,9 +71,9 @@ flowchart LR
 | 経路 | キットがすること |
 |---|---|
 | A1（iOS・ボタン1つ） | `planEscape` がアプリごとの開き方を返す（X・WhatsApp・Telegram などは `x-safari-https://`、Instagram は `instagram://extbrowser/`、Threads は `barcelona://extbrowser/`、LINE は `openExternalBrowser=1`）。ホストのボタンのクリックの処理の中で `escapeToBrowser` が実行し、開けたかを判定する |
-| A2（iOS・アプリのメニュー） | A1 が効かなかったとき、またはアプリに手段が無いとき、`fallback: menu` とアプリ名を返す。ホストはメニューの場所（下の表）を案内し、そのとき今のページの URL に引換券を付ける。メニューから開いても届く |
+| A2（iOS・アプリのメニュー） | A1 が効かなかったとき、またはアプリに手段が無いとき、`fallback: menu` とアプリ名を返す。ホストはメニューの場所（下の表）を案内し、そのとき引換券付きの URL で読み込み直す（`reloadWithTicket`）。メニューから開いても届く |
 | A3（Android） | Custom Tabs 型と分かれば `storage: shared` を返し、引換券を出さない |
-| A4（Android・ボタン1つ） | `intent://…#Intent;scheme=https;end` で既定のブラウザを開く。A1 と同じく、ボタンのクリックの処理の中で呼ぶ |
+| A4（Android・ボタン1つ） | `intent://…#Intent;scheme=https;end` で既定のブラウザを開く（X は `intent://` を開けないので除き、メニューに任せる）。A1 と同じく、ボタンのクリックの処理の中で呼ぶ |
 | A5（Android・アプリのメニュー） | A2 と同じ |
 | B1（iOS・Mac の Safari） | 追加の手順を出すときに引換券（`home-screen`）を発行し、`<link rel="manifest">` を引換券付きの URL に差し替える。サーバーは `start_url` に引換券を入れた manifest を返す。アプリの初回起動で受け取る。追加してから初めて開くまでに日が空くことがあるので、期限は長くする（6章） |
 | B2 | 届かなかったと分かったら（初回起動で端末に主体が無く、引換券も無い）、`fallback: host-login` を返す。ログインはホストの仕事 |
@@ -81,17 +81,29 @@ flowchart LR
 
 ### アプリのメニュー（A2・A5、要確認）
 
-各アプリの「ブラウザで開く」メニューの場所。覚えている範囲で書いたもので、まだ実機で確かめていない。8章のデモページで確かめてから、キットが返す手順のデータにする。版によって変わるので、データには確かめた日と版を残す。
+各アプリの「ブラウザで開く」メニューの場所。覚えている範囲で書いたもので、確かめたものには（確認: 日付・版）を付けた。8章のデモページで確かめてから、キットが返す手順のデータにする。版によって変わるので、データには確かめた日と版を残す。
 
 | アプリ | iOS | Android |
 |---|---|---|
-| LINE | 共有 →「Safari で開く」 | 「⋮」→「他のアプリで開く」 |
-| X | 共有 →「Safari で開く」 | 「⋮」→「ブラウザで開く」（Custom Tabs 型なら不要） |
-| Instagram | 「⋯」→「外部ブラウザで開く」 | 「⋮」→「外部ブラウザで開く」 |
+| LINE | 共有 →「Safari で開く」 | 「⋮」→「デフォルトのブラウザで開く」（確認: 2026-10-16・26.15.1） |
+| X | 共有 →「Safari で開く」 | 「⋮」→「ブラウザで開く」（確認: 2026-10-16。この端末の X は Custom Tabs 型ではなかった） |
+| Instagram | 「⋯」→「外部ブラウザで開く」 | 「⋮」→「Chrome で開く」（確認: 2026-10-16） |
 | Threads | 「⋯」→「外部ブラウザで開く」 | 「⋮」→「外部ブラウザで開く」 |
 | Facebook | 「⋯」→「外部ブラウザで開く」 | 「⋮」→「外部ブラウザで開く」 |
 | TikTok | 版によって無い | 版によって無い |
 | その他 | 分からない。「共有」や「⋯」からブラウザで開くよう案内する | 同左 |
+
+**URL を書き換えるだけでは届かない（2026-10-16、Android の LINE 26.15.1 で確認）**: LINE の「デフォルトのブラウザで開く」は、今の URL ではなく最初に読み込んだ URL を渡す。`/?test=1` で開いてから `history.replaceState` で券を付けても、Chrome は `/?test=1` で開いた。そのため、券付きの URL で読み込み直す（`reloadWithTicket`）。ほかのアプリが今の URL を渡す場合も、読み込み直したページの URL には券が付いているので届く。
+
+**メニューから開いて届くのは、ボタンを押したあとだけ**: 券は、ボタンが効かなかったときに読み込み直して URL に付ける。ボタンを押さずにいきなりメニューから開くと、券は付いていないので届かない（2026-10-16、Android の Instagram で確認）。ホストは、メニューの案内より先にボタンを見せる。
+
+**Android のボタン1つの実測（2026-10-16）**:
+
+- LINE: `openExternalBrowser=1` で Chrome が開き、届いた。確認の画面は出なかった
+- X: `intent://` で X が「このアクションを実行できるアプリはありません」を出した（X の WebView は `intent://` を解釈しない）。案内のとおりメニューから開くと届いた。`googlechrome://navigate?url=` も試したが、何も起きなかった。そのため Android の X では自動で開かず（`step: none`）、ボタンを押したらすぐメニューの案内にする
+- Instagram: `intent://` で Instagram が「アプリから退出しようとしています…このまま続けますか？」を出し、「次へ」で Chrome が開いて届いた。1回余分に押すことになる（Instagram の画面なので避けられない）
+
+**Android のホーム画面アプリ**: ホーム画面に追加したアプリ（WebAPK）は、そのサイトの URL を引き取る。外のブラウザを開いたつもりでも、追加済みならホーム画面アプリが開く。Chrome と保存領域が同じなので、引換券が届けば困らない。
 
 メニューが無いアプリでボタン1つも効かなかったときは、ホストが「リンクをコピーしてブラウザに貼り付ける」を最後の手段として出してよい。そのときコピーする URL にも引換券が付く（6章の「券の漏れ」を参照）。
 
@@ -104,9 +116,15 @@ flowchart LR
 - `blur`
 - 250ms ごとのタイマーが 900ms 以上遅れた（Meta の WebView は `visibilitychange` を確実に出さないため）
 
+Android の LINE（26.15.1）では、押してから約 50ms で `visibilitychange`（hidden）が来た。Android は裏に回ったページのタイマーを止めずに約1秒ごとに動かすので、タイマーの遅れの合図も出る。
+
 猶予（既定 2,500ms）のうちに合図が来なければ、代わり（メニューの案内）は1回だけ出す。次の方法を自動で試し続けることはしない。
 
 Instagram の `extbrowser` は、読み込み後のスクリプトからの遷移を無視する。そのため実際のタップの中で呼ぶ（`escapeToBrowser` はクリックの処理の中で呼ぶことを前提にする）。
+
+そのため、引換券はボタンを押す前に発行しておく（アプリ内ブラウザで開いたときなど）。押してから発行を待つと、タップから時間が空いて効かないおそれがある。ただし `escape` は新しく発行すると古い券を無効にするので、外のブラウザが受け取る前に次の券を発行してはいけない（opened のあとすぐ、ページに戻ったときなど）。届く途中の券が無効になる。
+
+LINE の `openExternalBrowser=1` は、開いた先の URL に残る。`clearTicketFromAddressBar` が引換券と一緒に消す。
 
 ## 5. 受け取りの分岐（図2）
 
@@ -201,10 +219,10 @@ function withoutTicket(url: string, param?: string): string;
 // 結果待ちの間に何かを表示するかはホストが決める。
 function escapeToBrowser(plan: EscapePlan, opts?: { graceMs?: number; navigate?: (href: string) => void }): Promise<'opened' | 'fallback'>;
 
-// メニューから開いても届くように、今のページの URL に引換券を付ける（history.replaceState）。
-// メニューの案内を出すときだけ呼ぶ（券の漏れを減らすため）。
-function putTicketInAddressBar(ticket: string, param?: string): void;
-// URL から消す。ボタン1つで開けたとき、受け取ったとき、捨てたときに呼ぶ。
+// メニューから開いても届くように、引換券付きの URL でページを読み込み直す（location.replace）。
+// メニューの案内を出すときだけ呼ぶ（券の漏れを減らすため）。読み込み直したことは sessionStorage に控える。
+function reloadWithTicket(ticket: string, opts?: { param?: string }): void;
+// URL から消す（LINE の openExternalBrowser も）。ボタン1つで開けたとき、受け取ったとき、捨てたときに呼ぶ。
 function clearTicketFromAddressBar(param?: string): void;
 
 // <link rel="manifest"> を引換券付きの manifest URL に差し替える（B1）。
@@ -220,8 +238,9 @@ interface RedemptionHost<Credential> {
   markNotified(ticket: string): void;
 }
 // URL に引換券が無ければ null。決着済み（wasNotified）なら照会せずに noop。
+// reloadWithTicket で読み込み直したページなら、受け取らず券も消さずに escapePending: true（ホストはメニューの案内をもう一度出す）。
 // noop・notify のときは URL から引換券を消す。adopt・choose のときは settleTicket が消す。
-function startRedemption<C>(host: RedemptionHost<C>, opts?: { url?: string; param?: string }): Promise<{ ticket: string; decision: RedemptionDecision } | null>;
+function startRedemption<C>(host: RedemptionHost<C>, opts?: { url?: string; param?: string }): Promise<{ ticket: string; decision: RedemptionDecision; escapePending?: true } | null>;
 
 // adopt のとき、または choose で利用者が選んだあとに呼ぶ。
 // 'take' は host.redeem、'keep' は host.discard を呼び、どちらも決着済みと控えて URL から引換券を消す。
@@ -294,7 +313,7 @@ URL に付けた引換券は、利用者が「リンクをコピー」や共有�
 
 利用者の手間を増やさないように、受け取りの前に確認は挟まない。代わりに次の3つで減らす。
 
-- 今のページの URL に券を付けるのは、メニューの案内を出すときだけ（`putTicketInAddressBar`）。ボタン1つで開けたら、すぐ URL から消す。
+- 今のページの URL に券を付けるのは、メニューの案内を出すときだけ（`reloadWithTicket`）。ボタン1つで開けたら、すぐ URL から消す。
 - `escape` の期限を 5分にする。
 - `Referrer-Policy: no-referrer` で、Referer から券が漏れないようにする。ホストがヘッダーで付ける（キットの README で必須として書く）。
 

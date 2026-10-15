@@ -9,7 +9,7 @@ export type EscapeStep =
 /**
  * アプリの「ブラウザで開く」メニューの場所。文言や図はホストが決める。
  * - opener: `share` は共有ボタン、`more` は「⋯」「⋮」のボタン
- * - item: `open-in-browser` は「Safari で開く」「（外部）ブラウザで開く」、`open-in-other-app` は「他のアプリで開く」
+ * - item: `open-in-browser` は「Safari で開く」「（外部・デフォルトの）ブラウザで開く」、`open-in-other-app` は「他のアプリで開く」
  */
 export interface MenuHint {
   opener: 'share' | 'more';
@@ -29,7 +29,7 @@ export interface EscapePlan {
   fallback: EscapeFallback;
 }
 
-// 設計書 4章「アプリのメニュー」の表。まだ実機で確かめていない。
+// 設計書 4章「アプリのメニュー」の表。実機で確かめたものは日付と版を書く。
 const MENU_HINTS: Partial<Record<Platform, Partial<Record<InAppName, MenuHint>>>> = {
   ios: {
     line: { opener: 'share', item: 'open-in-browser' },
@@ -39,7 +39,8 @@ const MENU_HINTS: Partial<Record<Platform, Partial<Record<InAppName, MenuHint>>>
     facebook: { opener: 'more', item: 'open-in-browser' },
   },
   android: {
-    line: { opener: 'more', item: 'open-in-other-app' },
+    // 2026-10-16 LINE 26.15.1 で確認:「⋮」→「デフォルトのブラウザで開く」。
+    line: { opener: 'more', item: 'open-in-browser' },
     x: { opener: 'more', item: 'open-in-browser' },
     instagram: { opener: 'more', item: 'open-in-browser' },
     threads: { opener: 'more', item: 'open-in-browser' },
@@ -60,11 +61,14 @@ export function planEscape(context: BrowserContext, targetUrl: string): EscapePl
   return { step: escapeStep(context.platform, app, new URL(targetUrl)), fallback };
 }
 
+/** LINE が外のブラウザで開き直す合図のパラメータ。開いた先では要らないので、引換券と一緒に消す。 */
+export const LINE_EXTERNAL_PARAM = 'openExternalBrowser';
+
 function escapeStep(platform: Platform, app: InAppName, target: URL): EscapeStep {
   // LINE は iOS・Android とも、このパラメータで外のブラウザに開き直す。
   if (app === 'line') {
     const url = new URL(target);
-    url.searchParams.set('openExternalBrowser', '1');
+    url.searchParams.set(LINE_EXTERNAL_PARAM, '1');
     return { kind: 'navigate', href: url.href };
   }
 
@@ -76,6 +80,9 @@ function escapeStep(platform: Platform, app: InAppName, target: URL): EscapeStep
   }
 
   if (platform === 'android') {
+    // X の WebView は intent:// も googlechrome:// も開けない（2026-10-16 確認）。
+    // intent:// では X が「このアクションを実行できるアプリはありません」を出して利用者を不安にさせるので、メニューに任せる。
+    if (app === 'x') return { kind: 'none' };
     // 既定のブラウザで開く。
     const scheme = target.protocol.replace(/:$/, '');
     const rest = target.href.slice(target.protocol.length + 2); // "//" の後ろ
