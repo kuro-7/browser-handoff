@@ -1,3 +1,6 @@
 node_modules/
 public/app.js
 .wrangler/
+# 実機の自動確認で使う、流す人のアカウント
+device/accounts.json
+device/out/

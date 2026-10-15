@@ -13,6 +13,7 @@
 - Instagram の会話: URL（ig.me）で直接開く
 名前の無いもの（LINE のトーク検索、X のメニュー）だけ、端末の言語ごとの言葉（WORDS）を使う。
 """
+import json
 import os
 import sys
 import time
@@ -25,13 +26,33 @@ X = 'com.twitter.android'
 IG = 'com.instagram.android'
 CHROME = 'com.android.chrome'
 
-# この端末・アカウントでの置き場所（利用者のデータ。言語とは関係ない）。
 DEMO_URL = r'^https://browser-handoff-demo\.pages\.dev/$'
 DEMO_HOST = r'^browser-handoff-demo\.pages\.dev$'
-IG_THREAD = 'https://ig.me/m/your.instagram.name'
-X_ACCOUNT_HANDLE = '@your_x_handle'  # 自分宛ての DM にデモのリンクがあるアカウント
-X_ACCOUNT_NAME = 'Your X display name'    # その表示名（切り替えの部品はこれで呼ばれる）
-LINE_CHAT_QUERY = 'Keep'   # トーク検索に入れる語（ASCII のみ）
+
+# デモのリンクを置いた場所は、流す人のアカウントなので repo に入れない。
+# accounts.json（git に入らない）に書く。書き方は accounts.example.json。
+ACCOUNTS_FILE = os.path.join(os.path.dirname(__file__), 'accounts.json')
+
+
+def _accounts():
+    try:
+        with open(ACCOUNTS_FILE, encoding='utf-8') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {}
+
+
+_ACC = _accounts()
+IG_THREAD = _ACC.get('instagram_thread_url', '')  # デモのリンクを送った Instagram の会話（https://ig.me/m/…）
+X_ACCOUNT_HANDLE = _ACC.get('x_handle', '')         # 自分宛ての DM にデモのリンクがある X のアカウント（@…）
+X_ACCOUNT_NAME = _ACC.get('x_display_name', '')     # その表示名（切り替えの部品はこれで呼ばれる）
+LINE_CHAT_QUERY = _ACC.get('line_chat_query', 'Keep')  # LINE のトーク検索に入れる語（ASCII のみ）
+
+
+def need(value, key):
+    if not value:
+        raise Fail(f'{ACCOUNTS_FILE} に {key} がありません（accounts.example.json を見て書く）')
+    return value
 
 # 名前（id）の無い部品の言葉。端末の言語ごと。en は未確認。
 WORDS = {
@@ -131,6 +152,8 @@ def x_open_drawer(w):
 
 
 def x_use_account(w):
+    need(X_ACCOUNT_HANDLE, 'x_handle')
+    need(X_ACCOUNT_NAME, 'x_display_name')
     """X で別のアカウントが開いていても、リンクを置いたアカウントに切り替える。
     メニューの頭に今のアカウントの @名前 が出るので、それで確かめる。"""
     for _ in range(3):
@@ -161,6 +184,7 @@ def open_x():
 def open_instagram():
     # ホーム画面は動き続けていて読めないので、会話に URL で直接飛ぶ。
     # 止めた直後に飛ぶと会話が読み込まれないことがあるので、先に起動しておき、出なければ飛び直す。
+    need(IG_THREAD, 'instagram_thread_url')
     phone.stop(IG)
     phone.launch(IG)
     time.sleep(6)
