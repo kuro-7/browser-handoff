@@ -68,18 +68,86 @@ interface LogEntry {
   at: number;
   where: string;
   text: string;
+  /** サーバーに送ったか。 */
+  sent?: boolean;
 }
 const LOG_KEY = 'demo.log';
 const LOG_MAX = 300;
 let log: LogEntry[] = load<LogEntry[]>(LOG_KEY, []);
 let where = '';
 
+// 記録は自動でサーバー（KV）にも送る。開発者が `npm run logs` で読み、操作を見て次の手順を伝えられるように。
+// 端末 ID は保存場所ごとの乱数（アカウントの ID とは別）。
+const DEVICE_KEY = 'demo.device';
+let device = load<string | null>(DEVICE_KEY, null);
+if (device === null) {
+  device = Array.from(crypto.getRandomValues(new Uint8Array(8)), (b) => b.toString(16).padStart(2, '0')).join('');
+  save(DEVICE_KEY, device);
+  // 送るようになる前の記録は送らない（前に試した分が混ざらないように）。
+  for (const e of log) e.sent = true;
+  save(LOG_KEY, log);
+}
+const deviceId = device;
+
 function record(text: string): void {
   log.push({ at: Date.now(), where, text });
   if (log.length > LOG_MAX) log = log.slice(-LOG_MAX);
   save(LOG_KEY, log);
   renderLog();
+  scheduleSend();
 }
+
+let sendTimer: number | undefined;
+let sending = false;
+const sendStatus = h('span', { class: 'note' });
+
+function scheduleSend(): void {
+  window.clearTimeout(sendTimer);
+  sendTimer = window.setTimeout(() => void sendLog(), 800);
+}
+
+function sendBody(entries: LogEntry[]): string {
+  return JSON.stringify({ device: deviceId, ua: navigator.userAgent, entries: entries.map(({ at, where: w, text }) => ({ at, where: w, text })) });
+}
+
+function renderSendStatus(): void {
+  const unsent = log.filter((e) => !e.sent).length;
+  fill(sendStatus, unsent === 0 ? '記録は自動で送っています（送信済み）' : `記録は自動で送っています（未送信 ${unsent} 件）`);
+}
+
+async function sendLog(): Promise<void> {
+  if (sending) return;
+  const pending = log.filter((e) => !e.sent).slice(0, 50);
+  if (pending.length === 0) return renderSendStatus();
+  sending = true;
+  try {
+    const res = await fetch('/api/log', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: sendBody(pending), keepalive: true });
+    if (res.ok) {
+      for (const e of pending) e.sent = true;
+      save(LOG_KEY, log);
+    }
+  } catch {
+    // 次に記録したとき、または次に開いたときに送り直す。
+  } finally {
+    sending = false;
+    renderSendStatus();
+  }
+  if (log.some((e) => !e.sent)) scheduleSend();
+}
+
+/** ページが隠れる・離れるときは sendBeacon で送る（fetch は途中で切られることがある）。 */
+function sendLogNow(): void {
+  const pending = log.filter((e) => !e.sent).slice(0, 50);
+  if (pending.length === 0) return;
+  if (navigator.sendBeacon?.('/api/log', new Blob([sendBody(pending)], { type: 'application/json' }))) {
+    for (const e of pending) e.sent = true;
+    save(LOG_KEY, log);
+  }
+}
+window.addEventListener('pagehide', sendLogNow);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') sendLogNow();
+});
 
 function time(ms: number): string {
   const d = new Date(ms);
@@ -796,7 +864,8 @@ function logCard(): HTMLElement {
     'section',
     {},
     h('h2', {}, '記録を送る'),
-    h('p', { class: 'note' }, '記録は場所（アプリ・ブラウザ）ごとに別です。試したそれぞれの場所でコピーしてください。コピーするのは直近30分の分だけなので、前の記録を消す必要はありません。'),
+    h('p', {}, sendStatus),
+    h('p', { class: 'note' }, '記録は自動で開発者に届くので、ふだんはコピーしなくて大丈夫です。送れないときだけ、ここでコピーして貼ってください（直近30分の分）。'),
     h('div', { class: 'row' }, h('button', { class: 'secondary', onclick: () => void copyReport() }, '記録をコピー（直近30分）'), copyStatus),
     reportArea,
     h('p', { class: 'field' }, '見たこと（押すと記録に残ります）'),
@@ -890,7 +959,7 @@ async function main(): Promise<void> {
       ...(homeMain ? homeExtras : [homeCard(), ...homeExtras]),
     ]),
   );
-  record(`場所: ${describePlace(context)}（${context.storage}） UA=${env.userAgent}`);
+  record(`場所: ${describePlace(context)}（${context.storage}） UA=${env.userAgent} 端末=${deviceId}`);
   renderSubject();
   restoreEscapeTicket();
   renderEscapeTicket();

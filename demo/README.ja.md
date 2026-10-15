@@ -10,7 +10,13 @@
 
 場所の判定（`detectContext`）、ID の作り直し、開き方の切り替え（「手段なし」でメニューの練習など）は「詳しい情報・切り替え」に畳んである。合図（`visibilitychange` など）が何 ms で来たかは記録に残る。
 
-記録は保存場所ごとに別なので、試したそれぞれの場所でコピーする（アプリ内ブラウザでコピーできないときは、出てくる欄を長押しして選ぶ）。
+記録は自動でサーバー（KV の `log:` で始まるキー、14日で消える）に送るので、試す人はコピーしなくてよい。開発者は次で読む（端末＝保存場所ごとに頭4文字の印が付く）。読む入口は公開していない。
+
+```bash
+npm run logs -- 30
+```
+
+送れないときのために「記録をコピー」も残してある（直近30分の分）。
 
 「アカウント」は乱数の ID と記録の数を localStorage に置くだけ。記録の数は券の `payload` に乗せて運ぶ。
 
@@ -23,6 +29,8 @@
 | `functions/api/[action].ts` | `POST /api/issue`・`peek`・`redeem`・`discard`（Cloudflare Pages Functions） |
 | `functions/manifest.webmanifest.ts` | `GET /manifest.webmanifest?handoff=…`。start_url に券を入れて返す |
 | `server/kvStore.ts` | 保存先（Workers KV）。KV が無ければメモリに置く |
+| `server/log.ts` | `POST /api/log`。ページの記録を KV に置く |
+| `scripts/logs.mjs` | `npm run logs`。KV の記録を時刻順に並べる |
 
 デモなので認証は無い。主体の ID は端末が送ってきたものをそのまま信じる。KV には条件付きの書き込みが無いので、`consume` は原子的でない（本番では使わない）。
 

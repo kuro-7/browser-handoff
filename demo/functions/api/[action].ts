@@ -3,6 +3,7 @@
 import { createHandoffService, HandoffError, type Purpose } from '../../../src/server/index.js';
 import { json, type Context } from '../../server/http.js';
 import { storeFor } from '../../server/kvStore.js';
+import { saveLog } from '../../server/log.js';
 
 const PURPOSES: readonly Purpose[] = ['escape', 'home-screen'];
 
@@ -15,6 +16,7 @@ export async function onRequestPost({ request, env, params }: Context): Promise<
     return json({ error: 'bad-request' }, 400);
   }
   const ticket = typeof body.ticket === 'string' ? body.ticket : '';
+  if (params.action === 'log') return saveLog(env.HANDOFF_KV, body);
 
   try {
     switch (params.action) {
