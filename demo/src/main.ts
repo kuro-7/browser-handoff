@@ -163,7 +163,7 @@ const MENU_WORDS: Partial<Record<Platform, Partial<Record<InAppName, string>>>> 
   android: {
     line: '「⋮」→「デフォルトのブラウザで開く」',
     x: '「⋮」→「ブラウザで開く」',
-    instagram: '「⋮」→「外部ブラウザで開く」',
+    instagram: '「⋮」→「Chrome で開く」',
     threads: '「⋮」→「外部ブラウザで開く」',
     facebook: '「⋮」→「外部ブラウザで開く」',
   },
@@ -284,6 +284,8 @@ interface Method {
   label: string;
   /** このアプリ・OS として planEscape に計画させる。null は「手段なし」。 */
   as?: { platform: Platform; app: InAppName } | null;
+  /** キットに無い開き方を試すとき。行き先の URL から移る先を作る。 */
+  href?: (target: string) => string;
 }
 const METHODS: Method[] = [
   { id: 'auto', label: '自動（今の場所の方法）' },
@@ -293,6 +295,12 @@ const METHODS: Method[] = [
   { id: 'ios-threads', label: 'barcelona://extbrowser（iOS の Threads の方法）', as: { platform: 'ios', app: 'threads' } },
   { id: 'line', label: 'openExternalBrowser=1（LINE の方法）', as: { platform: context.platform, app: 'line' } },
   { id: 'android', label: 'intent://（Android の方法）', as: { platform: 'android', app: 'other' } },
+  {
+    // キットにはまだ無い。Android の X で intent:// が「このアクションを実行できるアプリはありません」になったので試す。
+    id: 'android-chrome',
+    label: 'googlechrome://（Android の Chrome を指定、試し中）',
+    href: (target) => `googlechrome://navigate?url=${encodeURIComponent(target)}`,
+  },
 ];
 const METHOD_KEY = 'demo.method';
 const ESCAPE_TICKET_KEY = 'demo.escapeTicket';
@@ -329,6 +337,7 @@ function buildPlan(ticket: string): EscapePlan {
   const target = targetUrl(ticket);
   const real = planEscape(context, target);
   const method = METHODS.find((m) => m.id === methodSelect.value) ?? METHODS[0]!;
+  if (method.href) return { step: { kind: 'navigate', href: method.href(target) }, fallback: real.fallback };
   if (method.as === undefined) return real;
   if (method.as === null) return { step: { kind: 'none' }, fallback: real.fallback };
   const as: BrowserContext = { platform: method.as.platform, kind: 'in-app', app: method.as.app, storage: 'separate' };
