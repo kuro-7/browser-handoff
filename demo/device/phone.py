@@ -108,7 +108,8 @@ def launch(package):
 
 
 def foreground():
-    out = shell('dumpsys activity activities | grep -m1 topResumedActivity')
+    """前面のアプリ。アプリを切り替えている途中は、前面が無いことがある（空を返す）。"""
+    out = shell('dumpsys activity activities | grep -m1 topResumedActivity', check=False)
     m = re.search(r'u0 ([\w.]+)/', out)
     return m.group(1) if m else out.strip()
 
