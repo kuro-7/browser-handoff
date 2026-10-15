@@ -737,22 +737,27 @@ function renderLog(): void {
   fill(logView, ...log.slice().reverse().map((e) => h('div', {}, `${time(e.at)} [${e.where}] ${e.text}`)));
 }
 
-function report(): string {
+// 記録は消すまで貯まるので、ふだんは直近の分だけコピーする（前に試した分が混ざらないように）。
+const RECENT_MS = 30 * 60_000;
+
+function report(all: boolean): string {
   const s = loadSubject();
+  const since = all ? 0 : Date.now() - RECENT_MS;
+  const entries = log.filter((e) => e.at >= since);
   return [
     '# browser-handoff デモの記録',
-    `作成: ${time(Date.now())}`,
+    `作成: ${time(Date.now())}（${all ? '全部' : '直近30分'}）`,
     `URL: ${maskUrl(location.href)}`,
     `UA: ${env.userAgent}`,
     `場所: ${where}（storage=${context.storage}） standalone=${env.standalone} display-mode=${env.displayModeStandalone} タッチ点=${env.maxTouchPoints}`,
     `ID: ${s?.id ?? '—'}（記録 ${s?.plays ?? 0} 回）`,
     '',
-    ...log.map((e) => `${time(e.at)} [${e.where}] ${e.text}`),
+    ...entries.map((e) => `${time(e.at)} [${e.where}] ${e.text}`),
   ].join('\n');
 }
 
-async function copyReport(): Promise<void> {
-  const text = report();
+async function copyReport(all = false): Promise<void> {
+  const text = report(all);
   reportArea.value = text;
   try {
     await navigator.clipboard.writeText(text);
@@ -782,8 +787,8 @@ function logCard(): HTMLElement {
     'section',
     {},
     h('h2', {}, '記録を送る'),
-    h('p', { class: 'note' }, '記録は場所（アプリ・ブラウザ）ごとに別です。試したそれぞれの場所でコピーしてください。'),
-    h('div', { class: 'row' }, h('button', { class: 'secondary', onclick: () => void copyReport() }, '記録をコピー'), copyStatus),
+    h('p', { class: 'note' }, '記録は場所（アプリ・ブラウザ）ごとに別です。試したそれぞれの場所でコピーしてください。コピーするのは直近30分の分だけなので、前の記録を消す必要はありません。'),
+    h('div', { class: 'row' }, h('button', { class: 'secondary', onclick: () => void copyReport() }, '記録をコピー（直近30分）'), copyStatus),
     reportArea,
     h('p', { class: 'field' }, '見たこと（押すと記録に残ります）'),
     h('div', { class: 'chips' }, ...OBSERVATIONS.map((o) => h('button', { onclick: () => {
@@ -808,6 +813,7 @@ function logCard(): HTMLElement {
       h(
         'div',
         { class: 'row' },
+        h('button', { onclick: () => void copyReport(true) }, '全部コピー'),
         h('button', { onclick: () => {
           if (!confirm('この場所の記録を消しますか？')) return;
           log = [];
