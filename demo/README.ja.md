@@ -43,23 +43,17 @@ http://localhost:8788 で開く。KV はローカルのものが使われる。
 
 ## 出す（Cloudflare Pages）
 
-初回だけ:
+出ている場所: https://browser-handoff-demo.pages.dev
 
-```bash
-npx wrangler login
-```
-
-```bash
-npx wrangler kv namespace create HANDOFF_KV
-```
-
-出てきた id を `wrangler.toml` の `[[kv_namespaces]]` に入れて、コメントを外す。それから:
+Pages のプロジェクト `browser-handoff-demo` と KV の `HANDOFF_KV` は作ってあり、id は `wrangler.toml` に入っている。直したら:
 
 ```bash
 npm run deploy
 ```
 
-`https://browser-handoff-demo.pages.dev` のような URL になる。実機ではこの URL を X・LINE・Instagram の DM や自分宛ての投稿に貼って、アプリの中から開く。
+ログインが切れていたら、先に `npx wrangler login`。
+
+実機ではこの URL を X・LINE・Instagram の DM や自分宛ての投稿に貼って、アプリの中から開く。
 
 ## 確かめること（設計書 8章）
 

@@ -3,8 +3,8 @@ name = "browser-handoff-demo"
 pages_build_output_dir = "public"
 compatibility_date = "2026-10-01"
 
-# 出すときは `npx wrangler kv namespace create HANDOFF_KV` で作り、出てきた id を入れて有効にする。
-# ローカルでは `npm run dev` が --kv HANDOFF_KV で結び付けるので不要。
-# [[kv_namespaces]]
-# binding = "HANDOFF_KV"
-# id = "<id>"
+# 引換券の保存先（`npx wrangler kv namespace create HANDOFF_KV` で作ったもの）。
+# ローカルの `npm run dev` は --kv HANDOFF_KV でローカルのものを使う。
+[[kv_namespaces]]
+binding = "HANDOFF_KV"
+id = "3d096a25c713446295104e5cc2056690"
