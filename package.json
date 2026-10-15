@@ -1,7 +1,7 @@
 {
   "name": "browser-handoff",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.1.0-alpha.0",
   "description": "Carry an anonymous web-app account across storage partitions (in-app browser -> browser, iOS Safari -> home-screen app) without login.",
   "license": "MIT",
   "type": "module",
