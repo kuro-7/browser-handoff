@@ -15,7 +15,7 @@ Web アプリを遊んでいる人が、保存領域の違う場所へ移ると�
 
 - アカウントの中身を知ること。キットが扱うのは不透明な ID（`subjectId`）だけ。ID を資格情報（GeoCutter なら `clientToken`）に変えるのはホストの仕事。
 - 2つのアカウントをまとめること（統合）。移った先にどちらを置くかを決めるだけ。
-- 画面を描くこと。キットは「何を出すか」を返し、文言・カード・図はホストが描く（ヘッドレス）。
+- 画面を描くこと、文言を持つこと（ヘッドレス）。キットが返すのは「今どうなっているか」（状態）と「判断に要るデータ」だけ。それを見て、何を・どんな言葉で・どの見た目で出すか（出さないか）はホストが決める。文言はアプリごと・言語ごとに違うので、キットが持つとどのアプリにも合わない。
 - ログイン。届かなかったときの代わり（パスキーなど）はホストが用意する。
 - ホーム画面追加の促しの頻度（レベル5・7日・3回）。これもホストのルール。
 
@@ -45,7 +45,9 @@ GeoCutter の中に入るのは「つなぎ」だけになる: API の入口3本
 アプリ内ブラウザから出る道は2つある。利用者がリンクをコピーして貼り付ける必要は、どちらにも無い。
 
 - **ボタン1つ（A1・A4）**: ホストの画面のボタン（例「Safari で続きから遊ぶ」）を押すと、キットがアプリごとの方法で外のブラウザを開く。引換券はその URL に乗る。まずこちらを使う。
-- **アプリのメニュー（A2・A5）**: ボタンが効かなかったとき、またはアプリに自動で開く方法が無いときは、アプリ自身の「ブラウザで開く」メニューを使ってもらう。キットはアプリ名を返し、ホストがメニューの場所を案内する。引換券は前もって今のページの URL に付けてある（`putTicketInAddressBar`）。そのため、メニューから開いても券が届く。
+- **アプリのメニュー（A2・A5）**: ボタンが効かなかったとき、またはアプリに自動で開く方法が無いときは、アプリ自身の「ブラウザで開く」メニューを使ってもらう。キットはアプリ名とメニューの場所のデータを返し、ホストがそれを案内する。案内を出すときに、今のページの URL に引換券を付ける（`putTicketInAddressBar`）。そのため、メニューから開いても券が届く。
+
+キットが返すのは状態だけで、文言はホストが決める（1章）。たとえば、ボタンを押してから結果が出るまでは `escapeToBrowser` が結果待ちになる。その間に「Safari を開いています…」のような表示を出すかどうかはホストが決める。
 
 ```mermaid
 flowchart LR
@@ -69,11 +71,11 @@ flowchart LR
 | 経路 | キットがすること |
 |---|---|
 | A1（iOS・ボタン1つ） | `planEscape` がアプリごとの開き方を返す（X・WhatsApp・Telegram などは `x-safari-https://`、Instagram は `instagram://extbrowser/`、Threads は `barcelona://extbrowser/`、LINE は `openExternalBrowser=1`）。ホストのボタンのクリックの処理の中で `escapeToBrowser` が実行し、開けたかを判定する |
-| A2（iOS・アプリのメニュー） | A1 が効かなかったとき、またはアプリに手段が無いとき、`fallback: menu` とアプリ名を返す。ホストはメニューの場所（下の表）を案内する。引換券は今のページの URL にも付けてあるので、メニューから開いても届く |
+| A2（iOS・アプリのメニュー） | A1 が効かなかったとき、またはアプリに手段が無いとき、`fallback: menu` とアプリ名を返す。ホストはメニューの場所（下の表）を案内し、そのとき今のページの URL に引換券を付ける。メニューから開いても届く |
 | A3（Android） | Custom Tabs 型と分かれば `storage: shared` を返し、引換券を出さない |
 | A4（Android・ボタン1つ） | `intent://…#Intent;scheme=https;end` で既定のブラウザを開く。A1 と同じく、ボタンのクリックの処理の中で呼ぶ |
 | A5（Android・アプリのメニュー） | A2 と同じ |
-| B1（iOS・Mac の Safari） | 追加の手順を出すときに引換券（`home-screen`）を発行し、`<link rel="manifest">` を引換券付きの URL に差し替える。サーバーは `start_url` に引換券を入れた manifest を返す。アプリの初回起動で受け取る |
+| B1（iOS・Mac の Safari） | 追加の手順を出すときに引換券（`home-screen`）を発行し、`<link rel="manifest">` を引換券付きの URL に差し替える。サーバーは `start_url` に引換券を入れた manifest を返す。アプリの初回起動で受け取る。追加してから初めて開くまでに日が空くことがあるので、期限は長くする（6章） |
 | B2 | 届かなかったと分かったら（初回起動で端末に主体が無く、引換券も無い）、`fallback: host-login` を返す。ログインはホストの仕事 |
 | B3・B4 | `storage: shared` を返し、何もしない。追加のダイアログは pwa-install などに任せる（キットの範囲外） |
 
@@ -91,7 +93,7 @@ flowchart LR
 | TikTok | 版によって無い | 版によって無い |
 | その他 | 分からない。「共有」や「⋯」からブラウザで開くよう案内する | 同左 |
 
-メニューが無いアプリでボタン1つも効かなかったときは、ホストが「リンクをコピーしてブラウザに貼り付ける」を最後の手段として出してよい。そのときコピーする URL にも引換券が付く（9章の券の漏れの件を参照）。
+メニューが無いアプリでボタン1つも効かなかったときは、ホストが「リンクをコピーしてブラウザに貼り付ける」を最後の手段として出してよい。そのときコピーする URL にも引換券が付く（6章の「券の漏れ」を参照）。
 
 ### 外のブラウザを開けたかの判定
 
@@ -116,12 +118,13 @@ flowchart TD
   D2 -- いいえ --> R[notify：今のまま<br/>理由を1回だけ知らせる]
   D2 -- はい --> D3{移った先に<br/>記録がある？}
   D3 -- いいえ --> A[adopt：黙って受け取る]
-  D3 -- はい --> C[choose：どちらを使うか選ぶ<br/>既定は今のまま]
-  C -- 引き継ぐ --> SW[confirm-switch：確認してから切り替え]
+  D3 -- はい --> C[choose：どちらを使うか<br/>利用者に選んでもらう]
+  C -- 引き継ぐ --> SW[take：受け取って切り替える]
   C -- 今のまま・閉じた --> K[keep：引換券を使用済みにする]
+  A --> SW
 ```
 
-`decideRedemption` は純粋関数で、上の図をそのまま実装する。
+`decideRedemption` は純粋関数で、上の図をそのまま実装する。図の「選んでもらう」「知らせる」は、キットが画面を出すという意味ではない。キットは判断（`choose` など）とデータを返し、画面と文言はホストが用意する。選んだ結果は `settleTicket` でキットに返す。
 
 | 入力 | 意味 |
 |---|---|
@@ -134,9 +137,9 @@ flowchart TD
 | 出力 | ホストがすること |
 |---|---|
 | `noop` | 何もしない |
-| `notify`（理由つき） | 理由を1回だけ出す。`not-transferable` なら「ログインしてください」 |
-| `adopt` | `redeem` して資格情報を受け取り、保存する。「続きから遊べます」を出す |
-| `choose` | 両方の概要を並べた画面を出す。結果を `resolveChoice` に渡す |
+| `notify`（理由つき） | 理由を1回だけ知らせる（文言はホスト）。`not-transferable` なら、ログインで移すよう案内する |
+| `adopt` | `settleTicket(…, 'take')` を呼ぶ。ホストの `redeem` で資格情報を受け取って保存する。受け取ったことを知らせるか、どう知らせるかはホストが決める |
+| `choose` | 判断には2つの ID（この端末の主体・引換券の主体）が入る。ホストはそれぞれの概要（GeoCutter ならレベル・遊んだ回数）を自分で調べ、選ぶ画面を描く。既定は「今のまま」がよい。結果を `settleTicket(…, 'take' \| 'keep')` に渡す |
 
 `notifiedBefore` があるのは、ホーム画面アプリがアイコンを押すたびに同じ引換券付きの URL で開くため。2回目以降は `noop` になる（端末の主体が同じなら D1 で、違っても知らせ済みなら黙る）。
 
@@ -172,7 +175,7 @@ type RedemptionDecision =
   | { action: 'noop' }
   | { action: 'notify'; reason: 'expired' | 'used' | 'not-transferable' | 'unknown' }
   | { action: 'adopt' }
-  | { action: 'choose' };
+  | { action: 'choose'; deviceSubjectId: string; ticketSubjectId: string }; // ホストが両方の概要を調べて並べる
 function decideRedemption(input: RedemptionInput): RedemptionDecision;
 
 // 引換券の URL の扱い。パラメータ名は既定 'handoff'。
@@ -185,24 +188,34 @@ function withoutTicket(url: string, param?: string): string;
 
 ```ts
 // クリックの処理の中で呼ぶ。開けたら 'opened'、合図が来なければ 'fallback'。
+// 結果待ちの間に何かを表示するかはホストが決める。
 function escapeToBrowser(plan: EscapePlan, opts?: { graceMs?: number }): Promise<'opened' | 'fallback'>;
 
 // メニューから開いても届くように、今のページの URL に引換券を付ける（history.replaceState）。
+// メニューの案内を出すときだけ呼ぶ（券の漏れを減らすため）。
 function putTicketInAddressBar(ticket: string): void;
-// 受け取ったら（または捨てたら）URL から消す。
+// URL から消す。ボタン1つで開けたとき、受け取ったとき、捨てたときに呼ぶ。
 function clearTicketFromAddressBar(): void;
 
 // <link rel="manifest"> を引換券付きの manifest URL に差し替える（B1）。
 function overrideManifest(manifestUrl: string): () => void; // 戻す関数を返す
 
 // 起動時の受け取りの流れをまとめたもの。ホストは関数を渡すだけ。
-interface RedemptionHost {
+interface RedemptionHost<Credential> {
   deviceSubject(): Promise<{ id: string; hasRecords: boolean } | null>;
   peek(ticket: string): Promise<{ status: TicketStatus; subjectId?: string }>; // ホストの API を呼ぶ
+  redeem(ticket: string): Promise<Credential>;  // ホストの API を呼び、資格情報を受け取って保存する
+  discard?(ticket: string): Promise<void>;      // ホストの API を呼び、引換券を使用済みにする。無ければ端末に「知らせ済み」と控えるだけ
   wasNotified(ticket: string): boolean;
   markNotified(ticket: string): void;
 }
-function startRedemption(host: RedemptionHost, url?: string): Promise<{ ticket: string; decision: RedemptionDecision } | null>;
+function startRedemption<C>(host: RedemptionHost<C>, url?: string): Promise<{ ticket: string; decision: RedemptionDecision } | null>;
+
+// adopt のとき、または choose で利用者が選んだあとに呼ぶ。
+// 'take' は host.redeem、'keep' は host.discard を呼び、どちらも URL から引換券を消す。
+// キットは資格情報の中身を見ずに、そのまま返す。
+function settleTicket<C>(host: RedemptionHost<C>, ticket: string, choice: 'take'): Promise<{ result: 'taken'; credential: C }>;
+function settleTicket<C>(host: RedemptionHost<C>, ticket: string, choice: 'keep'): Promise<{ result: 'kept' }>;
 ```
 
 ### server
@@ -229,7 +242,7 @@ interface TicketRecord {
 
 function createHandoffService(opts: {
   store: HandoffStore;
-  ttlMs?: { escape: number; 'home-screen': number }; // 既定 10分 / 60分
+  ttlMs?: { escape: number; 'home-screen': number }; // 既定 5分 / 30日
   isTransferable?: (subjectId: string) => Promise<boolean>; // 発行時と受け取り時に呼ぶ
   now?: () => number;
 }): {
@@ -245,10 +258,30 @@ function renderManifest(base: WebAppManifest, startUrl: string): WebAppManifest;
 const memoryStore: () => HandoffStore; // テスト用
 ```
 
-- 同じ主体・同じ用途で新しく発行したら、古い引換券は無効にする。
+- `escape` は、同じ主体で新しく発行したら古い引換券を無効にする。
+- `home-screen` は、新しく発行しても古い引換券を無効にしない（主体ごとに新しい順に5枚まで残す）。追加の手順を何度か出したあとで、前に追加したアイコンを開いても届くようにするため。
 - 引換券は 128 ビットの乱数（base64url）。保存は SHA-256 のハッシュだけ。
 - 照会（`peek`）は引換券を使用済みにしない。選ぶ画面に概要を出すために使う。
 - 回数制限・認証・ログはホストの API の入口でやる。キットはログに引換券を出さない。
+
+### 期限
+
+| 用途 | 既定 | 理由 |
+|---|---|---|
+| `escape` | 5分 | ボタン1つなら数秒、メニューからでも1分ほどで届く。URL に乗って人目に触れるので短くする |
+| `home-screen` | 30日 | ホーム画面に追加してから初めて開くまでに日が空くことがある。期限が短いと、初めて開いたときに最初からになり、ログインで移すしかなくなる（いちばん悪い体験）。この券は manifest の `start_url` に入るだけで、利用者がコピーや共有をする場所には出ないので、長くしても危険はあまり増えない |
+
+### 券の漏れ
+
+URL に付けた引換券は、利用者が「リンクをコピー」や共有で URL を人に送ると、一緒に渡る。受け取った人の端末に記録が無ければ、図2で黙って受け取られ（adopt）、同じアカウントを2人で持つことになる。
+
+利用者の手間を増やさないように、受け取りの前に確認は挟まない。代わりに次の3つで減らす。
+
+- 今のページの URL に券を付けるのは、メニューの案内を出すときだけ（`putTicketInAddressBar`）。ボタン1つで開けたら、すぐ URL から消す。
+- `escape` の期限を 5分にする。
+- `Referrer-Policy: no-referrer` で、Referer から券が漏れないようにする。ホストがヘッダーで付ける（キットの README で必須として書く）。
+
+それでも確認を挟みたいホストは、`adopt` のときに自分で確認の画面を出してから `settleTicket` を呼べばよい。
 
 ## 7. GeoCutter でのつなぎ（参考）
 
@@ -256,7 +289,8 @@ const memoryStore: () => HandoffStore; // テスト用
 |---|---|
 | `POST /api/handoff/issue` | 今の `userIdentity` を確かめ、匿名なら `issue(userId, purpose)`。ログイン済みなら拒否（ログインで移す） |
 | `POST /api/handoff/peek` | `peek` の結果に、主体の概要（レベル・遊んだ回数）を足して返す |
-| `POST /api/handoff/redeem` | `redeem` し、その `userId` に新しい `clientToken` を発行して返す |
+| `POST /api/handoff/redeem` | 「引き継ぐ」なら `redeem` し、その `userId` に新しい `clientToken` を発行して返す。「今のまま」なら `discard` する（入口を増やさないため、同じ入口で受ける） |
+| `Referrer-Policy: no-referrer` | 全ページのヘッダーに付ける（券の漏れ対策） |
 | `GET /manifest.webmanifest?handoff=` | `renderManifest` で `start_url` を `/play?handoff=…` にして返す |
 | 保存先 | Supabase の `handoff_tickets` 表（`consume` は条件付き UPDATE で原子的に） |
 | 画面 | 「Safari で続きから遊ぶ」ボタン、メニューの図、選ぶ画面、知らせ |
@@ -267,9 +301,10 @@ const memoryStore: () => HandoffStore; // テスト用
 
 - `core` は単体テスト（図2の全分岐、`planEscape` の全アプリ）。
 - 実機確認用に小さなデモページを repo に置く（Cloudflare Pages などに出す）。GeoCutter を通さずに次を確かめる。
-  - A1: X・LINE・Instagram（iOS）でボタンから Safari が開くか
+  - A1: X・LINE・Instagram（iOS）でボタンから Safari が開くか。開く前に「Safari で開きますか？」のような確認が出て、1回余分に押すことになるか
+  - A2・A5: 4章のメニューの表が今の版と合っているか
   - A3/A4: Android の X が Custom Tabs 型か、`intent://` が効くか
-  - B1: iOS で差し替えた manifest の `start_url` が使われるか（iOS 26 の「Webアプリとして開く」がオンのとき）
+  - B1: iOS で差し替えた manifest の `start_url` が使われるか（iOS 26 の「Webアプリとして開く」がオンのとき）。追加した翌日以降に初めて開いても届くか
 - デモページの結果を見て、`planEscape` の表と B1 を採るかを決める。
 
 ## 9. 未決
@@ -278,10 +313,3 @@ const memoryStore: () => HandoffStore; // テスト用
 - 公開するか（今は非公開。公開するなら MIT）。
 - 場所の判定を自前で書くか、`inapp-spy`（MIT）に頼るか。依存を増やさないなら自前（UA の表は小さい）。
 - 配布の形: npm の非公開パッケージか、GitHub の git 依存か。
-- メニューの案内の図をキットが持つか（持つとヘッドレスでなくなる）。今はアプリ名と手順のデータだけ返す案。
-- URL に付けた引換券が、リンクの共有で他人に渡る件。A2・A5 のために今のページの URL に券を付けるので、利用者が「リンクをコピー」や共有で URL を人に送ると、券も一緒に渡る。受け取った人の端末に記録が無ければ、図2で黙って受け取られ（adopt）、同じアカウントを2人で持つことになる。対策の候補:
-  - 今のページの URL に券を付けるのは、メニューの案内を出すときだけにする。ボタン1つで開けたら URL から消す（`clearTicketFromAddressBar`）。
-  - `escape` の期限を短くする（例 10分 → 5分）。
-  - `escape` の受け取りでは、記録が無くても黙って受け取らず、「続きから遊びますか？」と1回確かめる（adopt を確認つきにする）。
-  - `Referrer-Policy: no-referrer` で、Referer から券が漏れないようにする。
-  - どれを既定にし、どれをホストの選択肢にするか。
