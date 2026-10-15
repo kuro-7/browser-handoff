@@ -229,3 +229,20 @@ describe('startRedemption / settleTicket', () => {
     expect(withoutDiscard.wasNotified(TICKET)).toBe(true);
   });
 });
+
+describe('startRedemption の概要', () => {
+  it('deviceSubject と peek の info を、中を見ずに結果へ通す', async () => {
+    history.replaceState(null, '', `https://example.com/?handoff=${TICKET}`);
+    const host: RedemptionHost<null, { level: number }> = {
+      deviceSubject: async () => ({ id: 'device', hasRecords: true, info: { level: 3 } }),
+      peek: async () => ({ status: 'valid', subjectId: 'ticket', info: { level: 7 } }),
+      redeem: async () => null,
+      wasNotified: () => false,
+      markNotified: () => {},
+    };
+    const started = await startRedemption(host);
+    expect(started?.decision.action).toBe('choose');
+    expect(started?.deviceInfo).toEqual({ level: 3 });
+    expect(started?.ticketInfo).toEqual({ level: 7 });
+  });
+});

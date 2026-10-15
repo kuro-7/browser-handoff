@@ -4,6 +4,16 @@ export {
   reloadWithTicket,
   type ReloadWithTicketOptions,
 } from './addressBar.js';
+export {
+  ARRIVAL_CHECKS_MS,
+  createEscapeFlow,
+  type EscapeFlow,
+  type EscapeFlowHost,
+  type EscapeFlowOptions,
+  type EscapeMissReason,
+  type EscapeState,
+  type IssuedTicket,
+} from './escapeFlow.js';
 export { overrideManifest } from './manifest.js';
 export {
   settleTicket,
