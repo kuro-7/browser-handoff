@@ -61,7 +61,7 @@ describe('createEscapeFlow', () => {
     });
   });
 
-  it('開いて、戻ってきたら照会し、使用済みなら届いた。次の券を用意する', async () => {
+  it('開いて、戻ってきたら照会し、使用済みなら届いた。届いたあとは券を用意しない', async () => {
     const host = fakeHost(['valid', 'used']);
     const states: EscapeState['kind'][] = [];
     flow = createEscapeFlow(host, { context: line, onChange: (s) => states.push(s.kind), navigate: () => setVisible(false) });
@@ -74,12 +74,38 @@ describe('createEscapeFlow', () => {
     await vi.advanceTimersByTimeAsync(3_000);
     expect(host.peeks).toBe(2);
     expect(flow.state).toEqual({ kind: 'arrived' });
-    expect(states).toEqual(['opening', 'checking', 'arrived']);
-    expect(host.issued).toBe(2);
-    expect(flow.ticket?.ticket).toBe(T2);
+    expect(states).toEqual(['idle', 'opening', 'checking', 'arrived']);
+    expect(flow.ticket).toBeNull();
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(host.issued).toBe(1);
   });
 
-  it('戻っても使われないまま照会を終えたら、メニューの案内のため券付きで読み込み直す', async () => {
+  it('届いたあとにまた押されたら、券を用意して開く', async () => {
+    const host = fakeHost(['used']);
+    const navigate = vi.fn(() => setVisible(false));
+    flow = createEscapeFlow(host, { context: line, navigate });
+    await vi.advanceTimersByTimeAsync(0);
+    await flow.press();
+    setVisible(true);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(flow.state.kind).toBe('arrived');
+    await flow.press();
+    expect(host.issued).toBe(2);
+    expect(navigate).toHaveBeenLastCalledWith(`https://example.com/play?handoff=${T2}&openExternalBrowser=1`);
+  });
+
+  it('裏にいる間は券を発行しない。表に出たら用意する', async () => {
+    Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
+    const host = fakeHost();
+    flow = createEscapeFlow(host, { context: line, navigate: () => {} });
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(host.issued).toBe(0);
+    setVisible(true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(host.issued).toBe(1);
+  });
+
+  it('戻っても使われないまま照会を終えたら、メニューの案内。読み込み直すのはホストが prepareMenu を呼んだとき', async () => {
     const host = fakeHost();
     const navigate = vi.fn((href: string) => {
       if (href.includes('openExternalBrowser')) setVisible(false);
@@ -90,9 +116,12 @@ describe('createEscapeFlow', () => {
     setVisible(true);
     await vi.advanceTimersByTimeAsync(6_000);
     expect(host.peeks).toBe(3);
-    expect(flow.state).toMatchObject({ kind: 'menu', reason: 'not-arrived' });
-    expect(navigate).toHaveBeenLastCalledWith(`https://example.com/play?handoff=${T1}`);
+    expect(flow.state).toMatchObject({ kind: 'menu', reason: 'not-arrived', reloaded: false });
+    expect(navigate).toHaveBeenCalledTimes(1); // 勝手には読み込み直さない
+    await vi.advanceTimersByTimeAsync(60_000);
     expect(host.issued).toBe(1); // 届く途中の券は作り直さない
+    await flow.prepareMenu();
+    expect(navigate).toHaveBeenLastCalledWith(`https://example.com/play?handoff=${T1}`);
   });
 
   it('裏と表を行き来しても、照会は1回押すごとに上限まで', async () => {
@@ -129,7 +158,7 @@ describe('createEscapeFlow', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(flow.plan.step.kind).toBe('none');
     await flow.press();
-    expect(flow.state).toMatchObject({ kind: 'menu', reason: 'no-button' });
+    expect(flow.state).toMatchObject({ kind: 'menu', reason: 'no-button', reloaded: false });
     expect(navigate).toHaveBeenCalledWith(`https://example.com/play?handoff=${T1}`);
   });
 
@@ -149,8 +178,11 @@ describe('createEscapeFlow', () => {
       markNotified: () => {},
     });
     expect(started?.escapePending).toBe(true);
-    flow = createEscapeFlow(host, { context: x, owner: 'u1', resume: started!.ticket, navigate });
-    expect(flow.state).toMatchObject({ kind: 'menu', reason: 'no-button' });
+    const first = vi.fn();
+    flow = createEscapeFlow(host, { context: x, owner: 'u1', resume: started!.ticket, navigate, onChange: first });
+    expect(flow.state).toMatchObject({ kind: 'menu', reason: 'no-button', reloaded: true });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(first).toHaveBeenCalledWith(flow.state); // 最初の状態も onChange で届く
     expect(flow.ticket?.ticket).toBe(T1);
     await vi.advanceTimersByTimeAsync(60_000);
     expect(host.issued).toBe(1);
@@ -188,5 +220,34 @@ describe('createEscapeFlow', () => {
     await vi.advanceTimersByTimeAsync(0);
     await flow.press();
     expect(flow.state.kind).toBe('issue-failed');
+  });
+});
+
+describe('createEscapeFlow の subscribe', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    sessionStorage.clear();
+    Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true });
+  });
+  afterEach(() => {
+    flow?.dispose();
+    flow = null;
+    vi.useRealTimers();
+  });
+
+  it('状態が変わったときだけ別のオブジェクトになり、止めたら呼ばれない', async () => {
+    const host = fakeHost();
+    flow = createEscapeFlow(host, { context: x, navigate: () => {} });
+    await vi.advanceTimersByTimeAsync(0);
+    const before = flow.getState();
+    expect(flow.getState()).toBe(before);
+    const seen: string[] = [];
+    const off = flow.subscribe((s) => seen.push(s.kind));
+    await flow.press();
+    expect(flow.getState()).not.toBe(before);
+    expect(seen).toEqual(['menu']);
+    off();
+    await flow.press();
+    expect(seen).toEqual(['menu']);
   });
 });

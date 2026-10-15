@@ -22,7 +22,10 @@ create index handoff_tickets_live on handoff_tickets (subject_id, purpose, issue
 -- 期限切れから日が経ったものは消してよい（home-screen は 30 日）。
 -- delete from handoff_tickets where expires_at < now() - interval '7 days';
 
-alter table handoff_tickets enable row level security; -- サーバーの鍵（service role）からだけ触る
+-- サーバーの鍵（service role）からだけ触る。Supabase は public の表を anon・authenticated にも見せるので外す。
+alter table handoff_tickets enable row level security;
+revoke all privileges on table handoff_tickets from anon, authenticated;
+grant select, insert, update on table handoff_tickets to service_role;
 ```
 
 `revokeBySubject`（新しい順に N 枚残して、残りを期限切れにする）は、REST だと「読む→書く」の2回になり原子的でない。関数にして1回で済ませる。
@@ -38,6 +41,10 @@ returns void language sql as $$
     offset p_keep_latest
   );
 $$;
+
+-- Supabase は public の関数を誰でも PostgREST から呼べるようにするので、サーバーの鍵だけにする。
+revoke execute on function handoff_revoke_by_subject(text, text, int, timestamptz) from public, anon, authenticated;
+grant execute on function handoff_revoke_by_subject(text, text, int, timestamptz) to service_role;
 ```
 
 ## PostgREST での実装の例

@@ -31,8 +31,14 @@ export type EscapeState =
   | { kind: 'checking' }
   /** 外のブラウザが受け取った。 */
   | { kind: 'arrived' }
-  /** アプリのメニューから開いてもらう。券付きの URL で読み込み直したあと（`resume`）もこの状態から始まる。 */
-  | { kind: 'menu'; fallback: Extract<EscapeFallback, { kind: 'menu' }>; reason: EscapeMissReason }
+  /**
+   * アプリのメニューから開いてもらう。
+   * `reloaded: false` のときは、まだ URL に券が無いので、メニューから開いても届かない。ホストは「メニューから開く方法を見る」のような
+   * ボタンを出し、押されたら `prepareMenu` を呼ぶ（券付きの URL で読み込み直す）。読み込み直したあとは `resume` で
+   * `reloaded: true` から始まるので、そこでメニューの場所を案内する。
+   * `no-button`（自動で開く手段が無いアプリでボタンが押された）のときは、押されたのが案内を見るためのボタンなので、すぐ読み込み直す。
+   */
+  | { kind: 'menu'; fallback: Extract<EscapeFallback, { kind: 'menu' }>; reason: EscapeMissReason; reloaded: boolean }
   /** もう一度ボタンを押してもらう（メニューでは券が届かないアプリ）。 */
   | { kind: 'retry'; fallback: Extract<EscapeFallback, { kind: 'retry' }>; reason: EscapeMissReason }
   /** 届いたか分からない（券が期限切れになった、照会できなかったなど）。もう一度押してもらう。 */
@@ -55,7 +61,7 @@ export interface EscapeFlowOptions {
   resume?: string;
   /** 開き方を差し替える（試験用）。既定は `planEscape`。 */
   plan?: (context: BrowserContext, target: string) => EscapePlan;
-  /** 状態が変わったとき。ホストはこれを見て描く。 */
+  /** 状態が変わったとき。作った直後にも、最初の状態で1回呼ぶ。`subscribe` と同じ。 */
   onChange?: (state: EscapeState) => void;
   /** 何が起きたかの短い記録（調べもの用）。 */
   onLog?: (message: string) => void;
@@ -65,12 +71,21 @@ export interface EscapeFlowOptions {
 
 export interface EscapeFlow {
   readonly state: EscapeState;
+  /** 今の状態。`subscribe` と組み合わせて React の `useSyncExternalStore` に渡せる（状態が変わったときだけ別のオブジェクトになる）。 */
+  getState(): EscapeState;
+  /** 状態が変わったら呼ぶ。止める関数を返す。 */
+  subscribe(listener: (state: EscapeState) => void): () => void;
   /** 今の券で開くときの方法。`step.kind === 'none'` なら、ボタンは「開く方法を見る」のような文言にする。 */
   readonly plan: EscapePlan;
   /** 用意してある券（調べもの用）。無ければ null。 */
   readonly ticket: IssuedTicket | null;
   /** ボタンが押されたとき。クリックの処理の中で、待たずに呼ぶこと（Instagram はタップ以外からの移動を無視する）。 */
   press(): Promise<void>;
+  /**
+   * メニューから開いても届くように、券付きの URL でページを読み込み直す。`menu` で `reloaded: false` のときに、
+   * 利用者が案内を見ると決めたら呼ぶ（読み込み直すと画面の状態が消えるので、キットは勝手には呼ばない）。
+   */
+  prepareMenu(): Promise<void>;
   /** 用意した券を捨てて作り直す（試験用）。開いている途中やメニューの案内の間は何もしない。 */
   renew(): Promise<void>;
   /** タイマーと見張りを止める。 */
@@ -78,6 +93,8 @@ export interface EscapeFlow {
 }
 
 // 券は押す前に用意し、期限が近づいたら押される前に作り直す（設計書 4章）。
+// ただし、ページが表に出ているときだけ。外のブラウザへ移ったあとも、アプリ内ブラウザのタブは裏に残り、
+// Android は裏のタイマーも動かすので、そのままでは発行が続く。
 const STORE_KEY = 'browser-handoff:escape-ticket';
 const MIN_LEFT_MS = 30_000;
 const REFRESH_BEFORE_MS = 60_000;
@@ -116,12 +133,14 @@ function writeSaved(saved: Saved | null): void {
   }
 }
 
+const visible = () => document.visibilityState === 'visible';
+
 /**
  * アプリ内ブラウザから外のブラウザへ出す流れ（経路 A1・A2・A4・A5）。
  * 券の用意と作り直し、ボタンで開く、戻ってからの確かめ、代わりの案内（メニュー・もう一度押す）までを受け持つ。
  * ホストは `state` を見て描き、ボタンのクリックで `press` を呼ぶだけでよい。
  *
- * メニューの案内では、券付きの URL でページを読み込み直す。読み込み直したあと、`startRedemption` が
+ * メニューの案内では、券付きの URL でページを読み込み直す（`prepareMenu`）。読み込み直したあと、`startRedemption` が
  * `escapePending` を返したら、その券を `resume` に渡して流れを作り直す。
  */
 export function createEscapeFlow(host: EscapeFlowHost, opts: EscapeFlowOptions): EscapeFlow {
@@ -130,16 +149,21 @@ export function createEscapeFlow(host: EscapeFlowHost, opts: EscapeFlowOptions):
   const log = opts.onLog ?? (() => {});
   const targetUrl = opts.targetUrl ?? (() => location.origin + location.pathname);
   const makePlan = opts.plan ?? planEscape;
+  const navigateOpts = opts.navigate ? { navigate: opts.navigate } : {};
 
   let state: EscapeState = { kind: 'idle' };
   let ticket: IssuedTicket | null = null;
   let preparing: Promise<IssuedTicket> | null = null;
   let disposed = false;
+  // 届いたあとは、また押されるまで券を用意しない（もう外のブラウザに移っている）。
+  let resting = false;
   let stopArrival: (() => void) | null = null;
+  const listeners = new Set<(state: EscapeState) => void>();
+  if (opts.onChange) listeners.add(opts.onChange);
 
   const setState = (next: EscapeState) => {
     state = next;
-    opts.onChange?.(next);
+    listeners.forEach((fn) => fn(next));
   };
   const planFor = (t: string | null) => {
     const target = targetUrl();
@@ -166,20 +190,25 @@ export function createEscapeFlow(host: EscapeFlowHost, opts: EscapeFlowOptions):
       });
     return preparing;
   };
-  const prepareQuietly = () => {
+
+  // 届く途中の券（開いている・確かめている・メニューの案内）は作り直さない。escape は新しく発行すると古い券を無効にするので。
+  const busy = () => state.kind === 'opening' || state.kind === 'checking' || state.kind === 'menu';
+  /** 押される前に券を用意しておく（無い、または期限が近いとき）。表に出ているときだけ。 */
+  const keepReady = () => {
+    if (disposed || resting || busy() || preparing || !visible()) return;
+    if (ticket !== null && left(ticket) >= REFRESH_BEFORE_MS) return;
+    if (ticket) log('券の期限が近いので作り直す');
     prepare().catch((e: unknown) => log(`券を用意できなかった: ${String(e)}`));
   };
+  const timer = window.setInterval(keepReady, TIMER_MS);
+  const onPageVisibility = () => keepReady();
+  document.addEventListener('visibilitychange', onPageVisibility);
 
-  // 期限が近ければ、押される前に作り直す。届く途中の券（開いている・確かめている・メニューの案内）は作り直さない。
-  // escape は新しく発行すると古い券を無効にするので。
-  const busy = () => state.kind === 'opening' || state.kind === 'checking' || state.kind === 'menu';
-  const timer = window.setInterval(() => {
-    if (busy() || preparing) return;
-    if (ticket === null || left(ticket) < REFRESH_BEFORE_MS) {
-      if (ticket) log('券の期限が近いので作り直す');
-      prepareQuietly();
-    }
-  }, TIMER_MS);
+  const reloadForMenu = (t: IssuedTicket, reason: EscapeMissReason) => {
+    log(`メニューの案内のため読み込み直す（${reason}）`);
+    keep(t, reason);
+    reloadWithTicket(t.ticket, { param, ...navigateOpts });
+  };
 
   const miss = (plan: EscapePlan, t: IssuedTicket, reason: EscapeMissReason) => {
     const { fallback } = plan;
@@ -189,24 +218,25 @@ export function createEscapeFlow(host: EscapeFlowHost, opts: EscapeFlowOptions):
       setState({ kind: 'retry', fallback, reason });
       return;
     }
-    // メニューから開いても届くように、券付きの URL で読み込み直す。読み込み直したあとは resume で続ける。
-    log(`メニューの案内のため読み込み直す（${reason}）`);
     keep(t, reason);
-    setState({ kind: 'menu', fallback, reason });
-    reloadWithTicket(t.ticket, { param, ...(opts.navigate ? { navigate: opts.navigate } : {}) });
+    setState({ kind: 'menu', fallback, reason, reloaded: false });
+    // 押されたのが「開く方法を見る」なら、すぐ読み込み直してよい。それ以外は、ホストが prepareMenu を呼ぶまで待つ。
+    if (reason === 'no-button') reloadForMenu(t, reason);
+    else log(`メニューの案内を待つ（${reason}）`);
   };
 
   const settleArrival = (status: TicketStatus) => {
-    // 使われた（または使えなくなった）券は使い回せない。次に押すときのために用意し直す。
+    // 使われた（または使えなくなった）券は使い回せない。
     keep(null);
     if (status === 'used') {
       log('届いた（券が使用済みになった）');
+      resting = true;
       setState({ kind: 'arrived' });
     } else {
       log(`届いたか分からない（券の状態: ${status}）`);
       setState({ kind: 'unknown', status });
+      keepReady();
     }
-    prepareQuietly();
   };
 
   const watchArrival = (plan: EscapePlan, t: IssuedTicket) => {
@@ -231,7 +261,7 @@ export function createEscapeFlow(host: EscapeFlowHost, opts: EscapeFlowOptions):
         log(`照会できなかった: ${String(e)}`);
         status = null;
       }
-      if (stopArrival !== stop || document.visibilityState !== 'visible') return;
+      if (stopArrival !== stop || !visible()) return;
       if (status !== null && status !== 'valid') {
         stop();
         settleArrival(status);
@@ -244,7 +274,7 @@ export function createEscapeFlow(host: EscapeFlowHost, opts: EscapeFlowOptions):
     // 表に出ているときだけ数える。裏に回ったら止め、戻ってきたら最初から（照会の回数には上限がある）。
     const schedule = () => {
       clear();
-      if (document.visibilityState !== 'visible') return;
+      if (!visible()) return;
       timers = ARRIVAL_CHECKS_MS.map((ms, i) =>
         window.setTimeout(() => void check(i === ARRIVAL_CHECKS_MS.length - 1), ms),
       );
@@ -255,29 +285,34 @@ export function createEscapeFlow(host: EscapeFlowHost, opts: EscapeFlowOptions):
     schedule();
   };
 
+  /** 期限に余裕のある券。無ければ発行を待つ。 */
+  const ensureTicket = async (): Promise<IssuedTicket | null> => {
+    if (ticket !== null && left(ticket) >= MIN_LEFT_MS) return ticket;
+    // 用意が間に合っていない。待ってから移るので、タップから時間が空く（Instagram では効かないかもしれない）。
+    log('券の用意を待つ');
+    try {
+      return await prepare();
+    } catch (error) {
+      log(`券を発行できなかった: ${String(error)}`);
+      setState({ kind: 'issue-failed', error });
+      return null;
+    }
+  };
+
   const press = async () => {
     if (disposed || state.kind === 'opening') return;
     stopArrival?.();
+    resting = false;
 
-    let t = ticket;
-    if (t === null || left(t) < MIN_LEFT_MS) {
-      // 用意が間に合っていない。待ってから移るので、タップから時間が空く（Instagram では効かないかもしれない）。
-      log('券の用意を待ってから開く');
-      try {
-        t = await prepare();
-      } catch (error) {
-        log(`券を発行できなかった: ${String(error)}`);
-        setState({ kind: 'issue-failed', error });
-        return;
-      }
-    }
+    const t = await ensureTicket();
+    if (t === null || disposed) return;
     const plan = planFor(t.ticket);
     if (plan.step.kind === 'none') {
       miss(plan, t, 'no-button');
       return;
     }
     setState({ kind: 'opening' });
-    const result = await escapeToBrowser(plan, opts.navigate ? { navigate: opts.navigate } : {});
+    const result = await escapeToBrowser(plan, navigateOpts);
     if (disposed) return;
     log(`開いた結果: ${result}`);
     if (result === 'opened') {
@@ -287,6 +322,14 @@ export function createEscapeFlow(host: EscapeFlowHost, opts: EscapeFlowOptions):
     } else {
       miss(plan, t, 'button-failed');
     }
+  };
+
+  const prepareMenu = async () => {
+    if (disposed || state.kind !== 'menu' || state.reloaded) return;
+    const { reason } = state;
+    const t = await ensureTicket();
+    if (t === null || disposed) return;
+    reloadForMenu(t, reason);
   };
 
   // 始め方: 保存した券があれば使い続ける（読み込み直しても、届く途中の券を無効にしないため）。
@@ -302,19 +345,28 @@ export function createEscapeFlow(host: EscapeFlowHost, opts: EscapeFlowOptions):
     const reason = usable?.reason ?? (plan.step.kind === 'none' ? 'no-button' : 'button-failed');
     state =
       plan.fallback.kind === 'menu'
-        ? { kind: 'menu', fallback: plan.fallback, reason }
+        ? { kind: 'menu', fallback: plan.fallback, reason, reloaded: true }
         : { kind: 'retry', fallback: plan.fallback, reason };
     log('メニューの案内の続き');
   } else if (usable) {
     keep({ ticket: usable.ticket, expiresAt: usable.expiresAt });
   } else {
     keep(null);
-    prepareQuietly();
+    keepReady();
   }
+  // 最初の状態も onChange で届ける（作った関数が返ってから）。
+  queueMicrotask(() => {
+    if (!disposed) opts.onChange?.(state);
+  });
 
   return {
     get state() {
       return state;
+    },
+    getState: () => state,
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
     },
     get plan() {
       return planFor(ticket?.ticket ?? null);
@@ -323,6 +375,7 @@ export function createEscapeFlow(host: EscapeFlowHost, opts: EscapeFlowOptions):
       return ticket;
     },
     press,
+    prepareMenu,
     async renew() {
       if (busy()) return;
       keep(null);
@@ -330,7 +383,9 @@ export function createEscapeFlow(host: EscapeFlowHost, opts: EscapeFlowOptions):
     },
     dispose() {
       disposed = true;
+      listeners.clear();
       window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', onPageVisibility);
       stopArrival?.();
     },
   };

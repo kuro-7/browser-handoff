@@ -236,7 +236,10 @@ function clearTicketFromAddressBar(param?: string): void;
 // アプリ内ブラウザから外へ出す流れをまとめたもの（A1・A2・A4・A5）。ホストは state を見て描き、ボタンで press を呼ぶだけ。
 // 券の用意と作り直し、ボタンで開く、戻ってからの照会（1・3・6 秒の3回、1回押すごとに6回まで）、代わりの案内を受け持つ。
 // 4章の「券は押す前に用意し、使い回す」「届く途中で次を発行しない」「戻ったら peek で確かめる」はここに入っている。
-// state: idle / opening / checking / arrived / menu（読み込み直す）/ retry / unknown / issue-failed
+// state: idle / opening / checking / arrived / menu / retry / unknown / issue-failed
+// menu は、読み込み直す前（reloaded: false）と後（true）がある。読み込み直すと画面の状態が消えるので、ホストが prepareMenu を呼んだときだけ読み込み直す
+// （自動で開く手段が無いアプリでボタンが押されたときは、押されたのが案内を見るためなので、すぐ読み込み直す）。
+// 券の発行と作り直しは、ページが表に出ているときだけ。arrived のあとは、また押されるまで発行しない。
 interface EscapeFlowHost {
   issue(): Promise<{ ticket: string; expiresAt: number }>; // ホストの API を呼ぶ（用途 escape）
   peek(ticket: string): Promise<TicketLookup>;
@@ -247,7 +250,10 @@ function createEscapeFlow(host: EscapeFlowHost, opts: {
   resume?: string;   // startRedemption が escapePending を返したときの券。メニューの案内から始める
   targetUrl?: () => string; param?: string;
   onChange?: (state: EscapeState) => void; onLog?: (message: string) => void;
-}): { state: EscapeState; plan: EscapePlan; press(): Promise<void>; dispose(): void };
+}): {
+  state: EscapeState; getState(): EscapeState; subscribe(fn: (s: EscapeState) => void): () => void; // React の useSyncExternalStore に渡せる
+  plan: EscapePlan; press(): Promise<void>; prepareMenu(): Promise<void>; dispose(): void;
+};
 
 // <link rel="manifest"> を引換券付きの manifest URL に差し替える（B1）。
 function overrideManifest(manifestUrl: string): () => void; // 戻す関数を返す

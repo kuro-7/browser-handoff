@@ -103,6 +103,11 @@ def home():
     shell('input keyevent KEYCODE_HOME')
 
 
+def wake():
+    """画面が消えていたら点ける（流している間に眠ることがある）。"""
+    shell('input keyevent KEYCODE_WAKEUP')
+
+
 def launch(package):
     shell(f'monkey -p {package} -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1')
 

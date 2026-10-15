@@ -246,6 +246,7 @@ def main(names):
     for name in names or SCENARIOS:
         started = time.strftime('%H:%M:%S')
         try:
+            phone.wake()
             note = SCENARIOS[name]()
             results.append((name, 'OK', note))
         except Exception as e:  # noqa: BLE001

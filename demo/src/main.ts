@@ -596,7 +596,21 @@ function renderEscapeState(s: EscapeState): void {
       );
       break;
     case 'menu':
-      // 読み込み直す直前にも一瞬出る。読み込み直したあとは resume でこの状態から始まる。
+      if (!s.reloaded) {
+        // まだ URL に券が無い。読み込み直すと画面の状態が消えるので、利用者が見ると決めてから読み込み直す。
+        fill(
+          escapeResult,
+          status(
+            'warn',
+            MISS_TITLES[s.reason],
+            h('p', {}, 'アプリのメニューからなら開けます。'),
+            h('button', { id: 'menu-button', onclick: () => void flow?.prepareMenu() }, 'メニューから開く方法を見る'),
+            h('p', { class: 'note' }, '押すとページが一度読み込み直されます（記録は消えません）。'),
+          ),
+        );
+        break;
+      }
+      // 読み込み直したあとは resume でこの状態から始まる。
       fill(
         escapeResult,
         status(
@@ -1020,8 +1034,7 @@ async function main(): Promise<void> {
 
   if (started?.escapePending) {
     // メニューの案内のために読み込み直したところ。同じ券のまま、案内の状態から始める。
-    flow = makeFlow(started.ticket);
-    renderEscapeState(flow.state);
+    flow = makeFlow(started.ticket); // 最初の状態は onChange で届く
   } else if (inApp) {
     flow = makeFlow();
   }

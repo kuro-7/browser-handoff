@@ -36,22 +36,29 @@ const flow = createEscapeFlow(
     context,                       // detectContext の結果
     owner: subjectId,              // 券の持ち主。変わったら作り直す
     resume: started?.escapePending ? started.ticket : undefined,
-    onChange: (state) => render(state),
+    onChange: (state) => render(state), // 作った直後にも最初の状態で1回呼ばれる
   },
 );
 button.onclick = () => void flow.press(); // クリックの処理の中で、待たずに呼ぶ
 ```
+
+React なら `useSyncExternalStore(flow.subscribe, flow.getState)` でそのまま使える（状態が変わったときだけ別のオブジェクトになる）。`owner`・`resume` が変わったら作り直し、外すときに `dispose` する。
+
+外のブラウザで開くのは、既定では今のページから query と hash を除いた URL（流入の `utm_*` を引き継がないため）。query で画面の状態を持つページなら、`targetUrl` で渡す。
 
 | `state.kind` | 出すもの（例） |
 |---|---|
 | `idle` | ボタン。`flow.plan.step.kind === 'none'` なら「ブラウザで開く方法を見る」 |
 | `opening`・`checking` | 「開いています…」 |
 | `arrived` | 「ブラウザで続きを遊べます」 |
-| `menu` | `state.fallback.menu` を見て、アプリのメニューの場所を案内する。ページは券付きの URL で読み込み直され、`resume` で同じ状態から始まる |
+| `menu`（`reloaded: false`） | 「メニューから開く方法を見る」ボタン。押されたら `flow.prepareMenu()`（券付きの URL で読み込み直す）。読み込み直すと画面の状態が消えるので、キットは勝手には読み込み直さない（自動で開く手段が無いアプリでボタンが押されたときだけ、すぐ読み込み直す） |
+| `menu`（`reloaded: true`） | 読み込み直したあと（`resume`）。`state.fallback.menu` を見て、アプリのメニューの場所を案内する |
 | `retry` | 「もう一度ボタンを押して、確認で『次へ』」 |
 | `unknown`・`issue-failed` | 「うまくいきませんでした。もう一度押してください」 |
 
 戻ってきてからの照会は、1秒・3秒・6秒の3回まで（行き来しても1回押すごとに6回まで）。ホストの API の回数制限に響かないように、回数はキットが決めている。
+
+券の発行と作り直しは、ページが表に出ているときだけ。届いたあと（`arrived`）は、また押されるまで発行しない（アプリ内ブラウザのタブは裏に残ることが多いので）。
 
 ### 起動時の順番
 
