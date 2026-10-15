@@ -379,6 +379,5 @@ URL に付けた引換券は、利用者が「リンクをコピー」や共有�
 ## 9. 未決
 
 - repo 名・パッケージ名。仮に `browser-handoff`。他の候補は `carry-on`（「続きから」）、`storage-handoff`、`webview-escape-handoff`。
-- 公開するか（今は非公開。公開するなら MIT）。
 - 場所の判定は、依存を増やさないため自前で書いた（`src/core/context.ts`）。UA の表が実機と合わなければ、`inapp-spy`（MIT）に替えることを考える。
-- 配布の形: 今は GitHub の git 依存を想定（入れるときに `prepare` でビルドされる）。npm の非公開パッケージにするかは、GeoCutter に入れるときに決める。
+- 配布の形: repo を MIT で公開し、GeoCutter からは GitHub の git 依存として、main のコミットを固定して入れる（2026-10-16 決定。入れるときに `prepare` でビルドされる）。npm に出すかは未決。
