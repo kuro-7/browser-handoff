@@ -100,6 +100,11 @@ describe('planEscape', () => {
     });
   });
 
+  it('Android Instagram は確認が出るので長めに待つ', () => {
+    expect(planEscape(inApp('android', 'instagram'), target).graceMs).toBe(10_000);
+    expect(planEscape(inApp('android', 'line'), target).graceMs).toBeUndefined();
+  });
+
   it('Android X は自動で開かない（メニューに任せる）', () => {
     expect(planEscape(inApp('android', 'x'), target).step).toEqual({ kind: 'none' });
   });

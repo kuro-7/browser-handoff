@@ -27,7 +27,16 @@ export interface EscapeFallback {
 export interface EscapePlan {
   step: EscapeStep;
   fallback: EscapeFallback;
+  /**
+   * 開けたかの合図を待つ時間の目安（ms）。無ければ escapeToBrowser の既定。
+   * 開く前にアプリが確認を出すとき、利用者が押すまで合図が来ないので長めにする。
+   */
+  graceMs?: number;
 }
+
+// Android の Instagram は intent:// の前に「アプリから退出しようとしています」を出し、
+// 「次へ」を押すまで合図が来ない（2026-10-16 確認。2.5 秒では押す前に fallback になった）。
+const CONFIRM_GRACE_MS = 10_000;
 
 // 設計書 4章「アプリのメニュー」の表。実機で確かめたものは日付と版を書く。
 const MENU_HINTS: Partial<Record<Platform, Partial<Record<InAppName, MenuHint>>>> = {
@@ -58,7 +67,11 @@ export function planEscape(context: BrowserContext, targetUrl: string): EscapePl
     menu: MENU_HINTS[context.platform]?.[app] ?? null,
   };
   if (context.kind !== 'in-app') return { step: { kind: 'none' }, fallback };
-  return { step: escapeStep(context.platform, app, new URL(targetUrl)), fallback };
+  const step = escapeStep(context.platform, app, new URL(targetUrl));
+  if (step.kind === 'navigate' && context.platform === 'android' && app === 'instagram') {
+    return { step, fallback, graceMs: CONFIRM_GRACE_MS };
+  }
+  return { step, fallback };
 }
 
 /** LINE が外のブラウザで開き直す合図のパラメータ。開いた先では要らないので、引換券と一緒に消す。 */

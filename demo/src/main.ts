@@ -371,7 +371,7 @@ let escapeTicket: Issued | null = null;
 let preparing: Promise<Issued> | null = null;
 
 const methodSelect = h('select', { id: 'method' }, ...METHODS.map((m) => h('option', { value: m.id }, m.label)));
-const graceInput = h('input', { type: 'number', value: String(DEFAULT_GRACE_MS), min: '0', step: '100', inputmode: 'numeric', style: 'width:7em' });
+const graceInput = h('input', { type: 'number', placeholder: '自動', min: '0', step: '100', inputmode: 'numeric', style: 'width:7em' });
 const planView = h('div');
 const ticketView = h('span', { class: 'note' });
 const escapeButton = h('button', { class: 'primary' }, '外のブラウザで開く');
@@ -532,7 +532,8 @@ async function onEscapeClick(): Promise<void> {
   const t0 = Date.now();
   stopWatching?.();
   const method = methodSelect.value;
-  const graceMs = Number(graceInput.value) || DEFAULT_GRACE_MS;
+  // 空なら計画の目安（Instagram は長め）、それも無ければキットの既定。
+  const graceMs = Number(graceInput.value) || undefined;
 
   let ticket = escapeTicket;
   let late = false;
@@ -549,7 +550,7 @@ async function onEscapeClick(): Promise<void> {
   }
   const plan = buildPlan(ticket.ticket);
   record(
-    `ボタンを押した: 方法=${method} 猶予=${graceMs}ms${late ? '（券の発行を待ってから移った）' : ''} → ${
+    `ボタンを押した: 方法=${method} 猶予=${graceMs ?? plan.graceMs ?? DEFAULT_GRACE_MS}ms${late ? '（券の発行を待ってから移った）' : ''} → ${
       plan.step.kind === 'navigate' ? maskUrl(plan.step.href) : 'なし'
     }`,
   );
@@ -558,7 +559,7 @@ async function onEscapeClick(): Promise<void> {
   escapeButton.disabled = true;
   fill(escapeResult, status('plain', '開いています…'));
 
-  const result = await escapeToBrowser(plan, { graceMs });
+  const result = await escapeToBrowser(plan, graceMs === undefined ? {} : { graceMs });
   escapeButton.disabled = false;
   const first = watcher.first();
   record(`escapeToBrowser: ${result}${first ? `（最初の合図: ${first}）` : '（合図なし）'} ${Date.now() - t0}ms`);

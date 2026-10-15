@@ -87,7 +87,7 @@ flowchart LR
 |---|---|---|
 | LINE | 共有 →「Safari で開く」 | 「⋮」→「デフォルトのブラウザで開く」（確認: 2026-10-16・26.15.1） |
 | X | 共有 →「Safari で開く」 | 「⋮」→「ブラウザで開く」（確認: 2026-10-16。この端末の X は Custom Tabs 型ではなかった） |
-| Instagram | 「⋯」→「外部ブラウザで開く」 | 「⋮」→「Chrome で開く」（確認: 2026-10-16） |
+| Instagram | 「⋯」→「外部ブラウザで開く」 | 「⋮」→「Chrome で開く」（確認: 2026-10-16。ただし券は届かない。下を参照） |
 | Threads | 「⋯」→「外部ブラウザで開く」 | 「⋮」→「外部ブラウザで開く」 |
 | Facebook | 「⋯」→「外部ブラウザで開く」 | 「⋮」→「外部ブラウザで開く」 |
 | TikTok | 版によって無い | 版によって無い |
@@ -101,7 +101,8 @@ flowchart LR
 
 - LINE: `openExternalBrowser=1` で Chrome が開き、届いた。確認の画面は出なかった
 - X: `intent://` で X が「このアクションを実行できるアプリはありません」を出した（X の WebView は `intent://` を解釈しない）。案内のとおりメニューから開くと届いた。`googlechrome://navigate?url=` も試したが、何も起きなかった。そのため Android の X では自動で開かず（`step: none`）、ボタンを押したらすぐメニューの案内にする
-- Instagram: `intent://` で Instagram が「アプリから退出しようとしています…このまま続けますか？」を出し、「次へ」で Chrome が開いて届いた。1回余分に押すことになる（Instagram の画面なので避けられない）
+- Instagram: `intent://` で Instagram が「アプリから退出しようとしています…このまま続けますか？」を出し、「次へ」で Chrome が開いて届いた。1回余分に押すことになる（Instagram の画面なので避けられない）。確認が出ている間は合図が来ないので、既定の 2.5 秒では「次へ」を押す前に fallback になり、届いたのに案内が出た。そのため `planEscape` は Android の Instagram で `graceMs: 10000` を返す
+- Instagram のメニュー（「⋮」→「Chrome で開く」）は、`reloadWithTicket` で読み込み直したあとでも、最初に開いたリンクの URL を渡す。券は届かない（2回試して2回とも券なし）。Android の Instagram ではメニューは代わりにならない。ボタンが効かなかったとき（確認で「キャンセル」を押したなど）は、もう一度ボタンを押して「次へ」を選んでもらうのがよい（未決: キットの `fallback` で表すか）
 
 **Android のホーム画面アプリ**: ホーム画面に追加したアプリ（WebAPK）は、そのサイトの URL を引き取る。外のブラウザを開いたつもりでも、追加済みならホーム画面アプリが開く。Chrome と保存領域が同じなので、引換券が届けば困らない。
 
@@ -196,6 +197,7 @@ interface MenuHint {
 interface EscapePlan {
   step: EscapeStep;
   fallback: { kind: 'menu'; app: InAppName; platform: Platform; menu: MenuHint | null };
+  graceMs?: number; // 合図を待つ時間の目安。開く前にアプリが確認を出すとき長め（Android の Instagram は 10 秒）
 }
 function planEscape(context: BrowserContext, targetUrl: string): EscapePlan;
 

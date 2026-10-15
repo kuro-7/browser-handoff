@@ -25,7 +25,7 @@ export function escapeToBrowser(plan: EscapePlan, opts: EscapeOptions = {}): Pro
   const { step } = plan;
   if (step.kind === 'none') return Promise.resolve('fallback');
 
-  const graceMs = opts.graceMs ?? DEFAULT_GRACE_MS;
+  const graceMs = opts.graceMs ?? plan.graceMs ?? DEFAULT_GRACE_MS;
   const navigate =
     opts.navigate ??
     ((href: string) => {

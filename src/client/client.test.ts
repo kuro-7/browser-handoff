@@ -56,6 +56,16 @@ describe('escapeToBrowser', () => {
     await expect(result).resolves.toBe('opened');
   });
 
+  it('計画に待つ時間があれば、それだけ待つ', async () => {
+    const result = escapeToBrowser({ ...plan, graceMs: 10_000 }, { navigate: () => {} });
+    let settled = false;
+    void result.then(() => (settled = true));
+    await vi.advanceTimersByTimeAsync(2500);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(7500);
+    await expect(result).resolves.toBe('fallback');
+  });
+
   it('自動で開く手段が無ければ、すぐ fallback', async () => {
     const navigate = vi.fn();
     await expect(escapeToBrowser({ ...plan, step: { kind: 'none' } }, { navigate })).resolves.toBe('fallback');
