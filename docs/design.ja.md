@@ -143,7 +143,9 @@ flowchart TD
 
 `notifiedBefore` があるのは、ホーム画面アプリがアイコンを押すたびに同じ引換券付きの URL で開くため。2回目以降は `noop` になる（端末の主体が同じなら D1 で、違っても知らせ済みなら黙る）。
 
-## 6. 公開する API（案）
+## 6. 公開する API
+
+実装は `src/` にある。ここには形だけ書く。細かい点はコードのコメントが正。
 
 ### core
 
@@ -160,14 +162,22 @@ interface BrowserContext {
   storage: 'separate' | 'shared' | 'unknown'; // 移る先（ブラウザ／ホーム画面）と保存領域が同じか
 }
 
-function detectContext(env: { userAgent: string; standalone?: boolean; displayModeStandalone?: boolean }): BrowserContext;
+// maxTouchPoints はデスクトップ表示の iPad（UA が Mac と同じ）を見分けるのに使う。
+function detectContext(env: {
+  userAgent: string; standalone?: boolean; displayModeStandalone?: boolean; maxTouchPoints?: number;
+}): BrowserContext;
 
 type EscapeStep =
   | { kind: 'navigate'; href: string }   // x-safari-https:// や intent:// など
   | { kind: 'none' };                    // 自動で開く手段が無い
+// アプリのメニューの場所（4章の表）。文言や図はホストが決める。
+interface MenuHint {
+  opener: 'share' | 'more';                         // 共有ボタン／「⋯」「⋮」
+  item: 'open-in-browser' | 'open-in-other-app';    // 「ブラウザで開く」／「他のアプリで開く」
+}
 interface EscapePlan {
   step: EscapeStep;
-  fallback: { kind: 'menu'; app: InAppName | 'other'; platform: Platform };
+  fallback: { kind: 'menu'; app: InAppName; platform: Platform; menu: MenuHint | null };
 }
 function planEscape(context: BrowserContext, targetUrl: string): EscapePlan;
 
@@ -189,13 +199,13 @@ function withoutTicket(url: string, param?: string): string;
 ```ts
 // クリックの処理の中で呼ぶ。開けたら 'opened'、合図が来なければ 'fallback'。
 // 結果待ちの間に何かを表示するかはホストが決める。
-function escapeToBrowser(plan: EscapePlan, opts?: { graceMs?: number }): Promise<'opened' | 'fallback'>;
+function escapeToBrowser(plan: EscapePlan, opts?: { graceMs?: number; navigate?: (href: string) => void }): Promise<'opened' | 'fallback'>;
 
 // メニューから開いても届くように、今のページの URL に引換券を付ける（history.replaceState）。
 // メニューの案内を出すときだけ呼ぶ（券の漏れを減らすため）。
-function putTicketInAddressBar(ticket: string): void;
+function putTicketInAddressBar(ticket: string, param?: string): void;
 // URL から消す。ボタン1つで開けたとき、受け取ったとき、捨てたときに呼ぶ。
-function clearTicketFromAddressBar(): void;
+function clearTicketFromAddressBar(param?: string): void;
 
 // <link rel="manifest"> を引換券付きの manifest URL に差し替える（B1）。
 function overrideManifest(manifestUrl: string): () => void; // 戻す関数を返す
@@ -209,13 +219,15 @@ interface RedemptionHost<Credential> {
   wasNotified(ticket: string): boolean;
   markNotified(ticket: string): void;
 }
-function startRedemption<C>(host: RedemptionHost<C>, url?: string): Promise<{ ticket: string; decision: RedemptionDecision } | null>;
+// URL に引換券が無ければ null。決着済み（wasNotified）なら照会せずに noop。
+// noop・notify のときは URL から引換券を消す。adopt・choose のときは settleTicket が消す。
+function startRedemption<C>(host: RedemptionHost<C>, opts?: { url?: string; param?: string }): Promise<{ ticket: string; decision: RedemptionDecision } | null>;
 
 // adopt のとき、または choose で利用者が選んだあとに呼ぶ。
-// 'take' は host.redeem、'keep' は host.discard を呼び、どちらも URL から引換券を消す。
+// 'take' は host.redeem、'keep' は host.discard を呼び、どちらも決着済みと控えて URL から引換券を消す。
 // キットは資格情報の中身を見ずに、そのまま返す。
-function settleTicket<C>(host: RedemptionHost<C>, ticket: string, choice: 'take'): Promise<{ result: 'taken'; credential: C }>;
-function settleTicket<C>(host: RedemptionHost<C>, ticket: string, choice: 'keep'): Promise<{ result: 'kept' }>;
+function settleTicket<C>(host: RedemptionHost<C>, ticket: string, choice: 'take', opts?: { param?: string }): Promise<{ result: 'taken'; credential: C }>;
+function settleTicket<C>(host: RedemptionHost<C>, ticket: string, choice: 'keep', opts?: { param?: string }): Promise<{ result: 'kept' }>;
 ```
 
 ### server
@@ -225,9 +237,11 @@ interface HandoffStore {
   // 保存するのは引換券のハッシュだけ。
   put(record: TicketRecord): Promise<void>;
   get(ticketHash: string): Promise<TicketRecord | null>;
-  // 未使用なら使用済みにして返す。原子的に行うこと（2回目は null）。
+  // 未使用で期限内なら使用済みにして返す。原子的に行うこと（2回目は null）。
   consume(ticketHash: string, now: number): Promise<TicketRecord | null>;
-  revokeBySubject(subjectId: string, purpose: Purpose): Promise<void>;
+  // 未使用の引換券のうち新しい順に keepLatest 枚を残し、残りを期限切れにする（expiresAt = now）。
+  // 消さずに残すのは、古い引換券で開いたときにも主体が分かり、図2の D1 で黙れるようにするため。
+  revokeBySubject(subjectId: string, purpose: Purpose, keepLatest: number, now: number): Promise<void>;
 }
 
 interface TicketRecord {
@@ -237,22 +251,25 @@ interface TicketRecord {
   issuedAt: number;
   expiresAt: number;
   usedAt: number | null;
-  payload?: string; // ホストが一緒に運ぶ小さなデータ（例: お気に入り）。上限 2KB
+  payload: string | null; // ホストが一緒に運ぶ小さなデータ（例: お気に入り）。上限 2KB
 }
 
 function createHandoffService(opts: {
   store: HandoffStore;
-  ttlMs?: { escape: number; 'home-screen': number }; // 既定 5分 / 30日
-  isTransferable?: (subjectId: string) => Promise<boolean>; // 発行時と受け取り時に呼ぶ
+  ttlMs?: { escape?: number; 'home-screen'?: number }; // 既定 5分 / 30日
+  isTransferable?: (subjectId: string) => Promise<boolean>; // 発行・照会・受け取りのときに呼ぶ
   now?: () => number;
 }): {
+  // 移せない主体なら HandoffError('not-transferable')、payload が 2KB を超えたら HandoffError('payload-too-large')。
   issue(subjectId: string, purpose: Purpose, payload?: string): Promise<{ ticket: string; expiresAt: number }>;
   peek(ticket: string): Promise<{ status: TicketStatus; subjectId?: string }>;
-  redeem(ticket: string): Promise<{ subjectId: string; payload?: string } | { error: TicketStatus }>;
+  redeem(ticket: string): Promise<{ subjectId: string; payload: string | null } | { error: Exclude<TicketStatus, 'valid'> }>;
   discard(ticket: string): Promise<void>;
 };
 
-// 元の manifest に start_url（引換券付き）を入れて返す。id は変えない。
+// 元の manifest の start_url を引換券付きの URL に替えて返す。
+// id は変えない。元に id が無ければ、元の start_url（無ければ "/"）を id に入れる
+// （id が無いとブラウザは start_url から id を決めるので、引換券ごとに別のアプリとみなされてしまう）。
 function renderManifest(base: WebAppManifest, startUrl: string): WebAppManifest;
 
 const memoryStore: () => HandoffStore; // テスト用
@@ -311,5 +328,5 @@ URL に付けた引換券は、利用者が「リンクをコピー」や共有�
 
 - repo 名・パッケージ名。仮に `browser-handoff`。他の候補は `carry-on`（「続きから」）、`storage-handoff`、`webview-escape-handoff`。
 - 公開するか（今は非公開。公開するなら MIT）。
-- 場所の判定を自前で書くか、`inapp-spy`（MIT）に頼るか。依存を増やさないなら自前（UA の表は小さい）。
-- 配布の形: npm の非公開パッケージか、GitHub の git 依存か。
+- 場所の判定は、依存を増やさないため自前で書いた（`src/core/context.ts`）。UA の表が実機と合わなければ、`inapp-spy`（MIT）に替えることを考える。
+- 配布の形: 今は GitHub の git 依存を想定（入れるときに `prepare` でビルドされる）。npm の非公開パッケージにするかは、GeoCutter に入れるときに決める。
