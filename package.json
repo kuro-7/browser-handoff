@@ -1,0 +1,37 @@
+{
+  "name": "browser-handoff",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Carry an anonymous web-app account across storage partitions (in-app browser -> browser, iOS Safari -> home-screen app) without login.",
+  "license": "UNLICENSED",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    "./core": {
+      "types": "./dist/core/index.d.ts",
+      "default": "./dist/core/index.js"
+    },
+    "./client": {
+      "types": "./dist/client/index.d.ts",
+      "default": "./dist/client/index.js"
+    },
+    "./server": {
+      "types": "./dist/server/index.d.ts",
+      "default": "./dist/server/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "prepare": "npm run build",
+    "check": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "happy-dom": "^20.14.6",
+    "typescript": "~6.0.2",
+    "vitest": "^4.1.12"
+  }
+}
