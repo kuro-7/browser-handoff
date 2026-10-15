@@ -95,3 +95,19 @@ X の中で開いて、いちばん上の ID が Chrome で開いたときと同
 4. 翌日以降に初めて開く場合も試す
 
 「start_url ではない URL で開いた」と出たら、iOS が manifest を使っていない。「詳しい情報・切り替え」の「ページを開いたときにホーム画面用の券を自動で用意する」をオンにして読み込み直してから追加し、iOS が manifest を読む時機の違いかを確かめる。
+
+## Android 実機で自動で確かめる（`device/`）
+
+USB デバッグでつないだ Android 端末で、LINE・Instagram・X の動きを自動で流します（Python と adb が要ります）。
+
+```
+cd device
+python run.py                 # 全部
+python run.py ig_next x_link  # 選んだものだけ
+```
+
+- アプリで触るのは「リンクを開く・ボタンや確認を押す・戻る」だけで、投稿や送信はしません。流している間は端末が勝手に動きます。
+- 文言ではなく名前で探します。デモのページは HTML の id（`escape-button`、`status-arrived`、`place-in-app` など）、Instagram の確認は Android 標準の `button1`（次へ）・`button2`（戻る）、Instagram の会話は URL で直接開きます。
+- 名前の無い LINE のトーク検索と X のメニューだけは、端末の言語ごとの言葉（`run.py` の `WORDS`）を使います。確かめたのは日本語だけです。
+- デモのリンクを置いた場所（LINE の Keep メモ、X の自分宛て DM、Instagram の会話）は `run.py` の先頭で変えます。
+- 環境変数: `ADB`（adb の場所）、`HANDOFF_OUT`（失敗したときの画面の写しの置き場所）。

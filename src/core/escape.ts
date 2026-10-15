@@ -16,18 +16,37 @@ export interface MenuHint {
   item: 'open-in-browser' | 'open-in-other-app';
 }
 
-export interface EscapeFallback {
-  kind: 'menu';
-  app: InAppName;
-  platform: Platform;
-  /** 分からない、またはメニューが無いときは null。 */
-  menu: MenuHint | null;
-}
+/** ボタン1つで開けなかったときの代わり。 */
+export type EscapeFallback =
+  /**
+   * アプリのメニューから開いてもらう。ホストは `reloadWithTicket` で券付きの URL に読み込み直してから案内する。
+   */
+  | {
+      kind: 'menu';
+      app: InAppName;
+      platform: Platform;
+      /** 分からない、またはメニューが無いときは null。 */
+      menu: MenuHint | null;
+    }
+  /**
+   * メニューでは券が届かない（最初に開いたリンクの URL を渡すアプリ）。
+   * もう一度ボタンを押して、アプリが出す確認で進んでもらう。読み込み直さなくてよい。
+   */
+  | { kind: 'retry'; app: InAppName; platform: Platform };
 
 export interface EscapePlan {
   step: EscapeStep;
   fallback: EscapeFallback;
+  /**
+   * 開けたかの合図を待つ時間の目安（ms）。無ければ escapeToBrowser の既定。
+   * 開く前にアプリが確認を出すとき、利用者が押すまで合図が来ないので長めにする。
+   */
+  graceMs?: number;
 }
+
+// Android の Instagram は intent:// の前に「アプリから退出しようとしています」を出し、
+// 「次へ」を押すまで合図が来ない（2026-10-16 確認。2.5 秒では押す前に fallback になった）。
+const CONFIRM_GRACE_MS = 10_000;
 
 // 設計書 4章「アプリのメニュー」の表。実機で確かめたものは日付と版を書く。
 const MENU_HINTS: Partial<Record<Platform, Partial<Record<InAppName, MenuHint>>>> = {
@@ -49,16 +68,23 @@ const MENU_HINTS: Partial<Record<Platform, Partial<Record<InAppName, MenuHint>>>
 };
 
 /** 外のブラウザの開き方を決める。実行は client の `escapeToBrowser`。 */
+// メニューが最初に開いたリンクの URL を渡すので、券が届かないアプリ（2026-10-16 確認）。
+// Android の Instagram は「⋮」→「Chrome で開く」が、読み込み直したあとでも最初のリンクを渡す。
+function menuDropsTicket(platform: Platform, app: InAppName): boolean {
+  return platform === 'android' && app === 'instagram';
+}
+
 export function planEscape(context: BrowserContext, targetUrl: string): EscapePlan {
   const app = context.app ?? 'other';
-  const fallback: EscapeFallback = {
-    kind: 'menu',
-    app,
-    platform: context.platform,
-    menu: MENU_HINTS[context.platform]?.[app] ?? null,
-  };
+  const fallback: EscapeFallback = menuDropsTicket(context.platform, app)
+    ? { kind: 'retry', app, platform: context.platform }
+    : { kind: 'menu', app, platform: context.platform, menu: MENU_HINTS[context.platform]?.[app] ?? null };
   if (context.kind !== 'in-app') return { step: { kind: 'none' }, fallback };
-  return { step: escapeStep(context.platform, app, new URL(targetUrl)), fallback };
+  const step = escapeStep(context.platform, app, new URL(targetUrl));
+  if (step.kind === 'navigate' && context.platform === 'android' && app === 'instagram') {
+    return { step, fallback, graceMs: CONFIRM_GRACE_MS };
+  }
+  return { step, fallback };
 }
 
 /** LINE が外のブラウザで開き直す合図のパラメータ。開いた先では要らないので、引換券と一緒に消す。 */

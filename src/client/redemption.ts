@@ -3,12 +3,15 @@ import { DEFAULT_TICKET_PARAM, readTicket } from '../core/ticketUrl.js';
 import type { TicketLookup } from '../core/types.js';
 import { clearTicketFromAddressBar, isEscapePending } from './addressBar.js';
 
-/** 受け取りの流れでキットが呼ぶ、ホストの関数。 */
-export interface RedemptionHost<Credential> {
+/**
+ * 受け取りの流れでキットが呼ぶ、ホストの関数。
+ * `Info` は、選ぶ画面に並べる概要（GeoCutter ならレベル・遊んだ回数）。キットは中を見ずに結果へ通す。
+ */
+export interface RedemptionHost<Credential, Info = unknown> {
   /** 移った先（この端末）の主体。無ければ null。 */
-  deviceSubject(): Promise<{ id: string; hasRecords: boolean } | null>;
-  /** ホストの API を呼び、引換券を照会する。 */
-  peek(ticket: string): Promise<TicketLookup>;
+  deviceSubject(): Promise<{ id: string; hasRecords: boolean; info?: Info } | null>;
+  /** ホストの API を呼び、引換券を照会する。ホストの照会の入口が概要も返すなら `info` に入れる。 */
+  peek(ticket: string): Promise<TicketLookup & { info?: Info }>;
   /** ホストの API を呼び、資格情報を受け取って保存する。キットは中身を見ない。 */
   redeem(ticket: string): Promise<Credential>;
   /** ホストの API を呼び、引換券を使用済みにする。無ければ端末に「知らせ済み」と控えるだけ。 */
@@ -28,9 +31,13 @@ export interface StartRedemptionOptions extends TicketParamOptions {
   url?: string;
 }
 
-export interface StartRedemptionResult {
+export interface StartRedemptionResult<Info = unknown> {
   ticket: string;
   decision: RedemptionDecision;
+  /** `deviceSubject` が返した概要（選ぶ画面に並べる）。 */
+  deviceInfo?: Info;
+  /** `peek` が返した概要。 */
+  ticketInfo?: Info;
   /**
    * この券は、このページが `reloadWithTicket` で付けたもの（メニューの案内のために読み込み直した）。
    * 受け取りはせず（decision は noop）、URL の券も消さない。ホストはメニューの案内をもう一度出す。
@@ -42,10 +49,10 @@ export interface StartRedemptionResult {
  * 起動時に呼ぶ。URL に引換券が無ければ null。
  * `adopt`・`choose` のときは、続けて `settleTicket` を呼ぶ（choose は利用者が選んだあと）。
  */
-export async function startRedemption<C>(
-  host: RedemptionHost<C>,
+export async function startRedemption<C, I = unknown>(
+  host: RedemptionHost<C, I>,
   opts: StartRedemptionOptions = {},
-): Promise<StartRedemptionResult | null> {
+): Promise<StartRedemptionResult<I> | null> {
   const param = opts.param ?? DEFAULT_TICKET_PARAM;
   const ticket = readTicket(opts.url ?? location.href, param);
   if (ticket === null) return null;
@@ -66,9 +73,25 @@ export async function startRedemption<C>(
     notifiedBefore: false,
   });
 
+  if (decision.action === 'noop' && lookup.status === 'valid') {
+    // もう同じ主体がいる（図2の D1）。券の役目は済んだので使用済みにする。
+    // 元のページは券が使用済みになったかを照会して、外のブラウザに届いたかを確かめられる
+    // （合図だけでは、ほかのアプリに切り替えたのと見分けられない）。
+    try {
+      await host.discard?.(ticket);
+    } catch {
+      // 使用済みにできなくても、この端末の受け取りには関係しない。
+    }
+    host.markNotified(ticket);
+  }
   if (decision.action === 'notify') host.markNotified(ticket);
   if (decision.action === 'noop' || decision.action === 'notify') clearTicketFromAddressBar(param);
-  return { ticket, decision };
+  return {
+    ticket,
+    decision,
+    ...(device?.info !== undefined ? { deviceInfo: device.info } : {}),
+    ...(lookup.info !== undefined ? { ticketInfo: lookup.info } : {}),
+  };
 }
 
 /**
@@ -76,19 +99,19 @@ export async function startRedemption<C>(
  * 'take' は host.redeem、'keep' は host.discard を呼び、どちらも決着済みと控えて URL から引換券を消す。
  */
 export function settleTicket<C>(
-  host: RedemptionHost<C>,
+  host: RedemptionHost<C, unknown>,
   ticket: string,
   choice: 'take',
   opts?: TicketParamOptions,
 ): Promise<{ result: 'taken'; credential: C }>;
 export function settleTicket<C>(
-  host: RedemptionHost<C>,
+  host: RedemptionHost<C, unknown>,
   ticket: string,
   choice: 'keep',
   opts?: TicketParamOptions,
 ): Promise<{ result: 'kept' }>;
 export async function settleTicket<C>(
-  host: RedemptionHost<C>,
+  host: RedemptionHost<C, unknown>,
   ticket: string,
   choice: 'take' | 'keep',
   opts: TicketParamOptions = {},

@@ -56,6 +56,16 @@ describe('escapeToBrowser', () => {
     await expect(result).resolves.toBe('opened');
   });
 
+  it('計画に待つ時間があれば、それだけ待つ', async () => {
+    const result = escapeToBrowser({ ...plan, graceMs: 10_000 }, { navigate: () => {} });
+    let settled = false;
+    void result.then(() => (settled = true));
+    await vi.advanceTimersByTimeAsync(2500);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(7500);
+    await expect(result).resolves.toBe('fallback');
+  });
+
   it('自動で開く手段が無ければ、すぐ fallback', async () => {
     const navigate = vi.fn();
     await expect(escapeToBrowser({ ...plan, step: { kind: 'none' } }, { navigate })).resolves.toBe('fallback');
@@ -155,6 +165,13 @@ describe('startRedemption / settleTicket', () => {
     expect((await startRedemption(host))?.escapePending).toBeUndefined();
   });
 
+  it('同じ主体なら noop で、券を使用済みにする（元のページが届いたと分かるように）', async () => {
+    const { host, notified } = fakeHost({ device: { id: 'A', hasRecords: true } });
+    expect((await startRedemption(host))?.decision).toEqual({ action: 'noop' });
+    expect(host.discard).toHaveBeenCalledWith(TICKET);
+    expect(notified.has(TICKET)).toBe(true);
+  });
+
   it('引換券が無ければ null', async () => {
     history.replaceState(null, '', 'https://example.com/play');
     const { host } = fakeHost({});
@@ -210,5 +227,22 @@ describe('startRedemption / settleTicket', () => {
     const { discard: _discard, ...withoutDiscard } = host;
     expect(await settleTicket(withoutDiscard, TICKET, 'keep')).toEqual({ result: 'kept' });
     expect(withoutDiscard.wasNotified(TICKET)).toBe(true);
+  });
+});
+
+describe('startRedemption の概要', () => {
+  it('deviceSubject と peek の info を、中を見ずに結果へ通す', async () => {
+    history.replaceState(null, '', `https://example.com/?handoff=${TICKET}`);
+    const host: RedemptionHost<null, { level: number }> = {
+      deviceSubject: async () => ({ id: 'device', hasRecords: true, info: { level: 3 } }),
+      peek: async () => ({ status: 'valid', subjectId: 'ticket', info: { level: 7 } }),
+      redeem: async () => null,
+      wasNotified: () => false,
+      markNotified: () => {},
+    };
+    const started = await startRedemption(host);
+    expect(started?.decision.action).toBe('choose');
+    expect(started?.deviceInfo).toEqual({ level: 3 });
+    expect(started?.ticketInfo).toEqual({ level: 7 });
   });
 });

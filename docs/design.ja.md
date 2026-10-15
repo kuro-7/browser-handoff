@@ -74,7 +74,7 @@ flowchart LR
 | A2（iOS・アプリのメニュー） | A1 が効かなかったとき、またはアプリに手段が無いとき、`fallback: menu` とアプリ名を返す。ホストはメニューの場所（下の表）を案内し、そのとき引換券付きの URL で読み込み直す（`reloadWithTicket`）。メニューから開いても届く |
 | A3（Android） | Custom Tabs 型と分かれば `storage: shared` を返し、引換券を出さない |
 | A4（Android・ボタン1つ） | `intent://…#Intent;scheme=https;end` で既定のブラウザを開く（X は `intent://` を開けないので除き、メニューに任せる）。A1 と同じく、ボタンのクリックの処理の中で呼ぶ |
-| A5（Android・アプリのメニュー） | A2 と同じ |
+| A5（Android・アプリのメニュー） | A2 と同じ。ただし Android の Instagram はメニューでは券が届かないので、`fallback: retry` を返し、ホストは「もう一度ボタンを押して『次へ』」と案内する |
 | B1（iOS・Mac の Safari） | 追加の手順を出すときに引換券（`home-screen`）を発行し、`<link rel="manifest">` を引換券付きの URL に差し替える。サーバーは `start_url` に引換券を入れた manifest を返す。アプリの初回起動で受け取る。追加してから初めて開くまでに日が空くことがあるので、期限は長くする（6章） |
 | B2 | 届かなかったと分かったら（初回起動で端末に主体が無く、引換券も無い）、`fallback: host-login` を返す。ログインはホストの仕事 |
 | B3・B4 | `storage: shared` を返し、何もしない。追加のダイアログは pwa-install などに任せる（キットの範囲外） |
@@ -87,7 +87,7 @@ flowchart LR
 |---|---|---|
 | LINE | 共有 →「Safari で開く」 | 「⋮」→「デフォルトのブラウザで開く」（確認: 2026-10-16・26.15.1） |
 | X | 共有 →「Safari で開く」 | 「⋮」→「ブラウザで開く」（確認: 2026-10-16。この端末の X は Custom Tabs 型ではなかった） |
-| Instagram | 「⋯」→「外部ブラウザで開く」 | 「⋮」→「Chrome で開く」（確認: 2026-10-16） |
+| Instagram | 「⋯」→「外部ブラウザで開く」 | 「⋮」→「Chrome で開く」（確認: 2026-10-16。ただし券は届かない。下を参照） |
 | Threads | 「⋯」→「外部ブラウザで開く」 | 「⋮」→「外部ブラウザで開く」 |
 | Facebook | 「⋯」→「外部ブラウザで開く」 | 「⋮」→「外部ブラウザで開く」 |
 | TikTok | 版によって無い | 版によって無い |
@@ -101,7 +101,8 @@ flowchart LR
 
 - LINE: `openExternalBrowser=1` で Chrome が開き、届いた。確認の画面は出なかった
 - X: `intent://` で X が「このアクションを実行できるアプリはありません」を出した（X の WebView は `intent://` を解釈しない）。案内のとおりメニューから開くと届いた。`googlechrome://navigate?url=` も試したが、何も起きなかった。そのため Android の X では自動で開かず（`step: none`）、ボタンを押したらすぐメニューの案内にする
-- Instagram: `intent://` で Instagram が「アプリから退出しようとしています…このまま続けますか？」を出し、「次へ」で Chrome が開いて届いた。1回余分に押すことになる（Instagram の画面なので避けられない）
+- Instagram: `intent://` で Instagram が「アプリから退出しようとしています…このまま続けますか？」を出し、「次へ」で Chrome が開いて届いた。1回余分に押すことになる（Instagram の画面なので避けられない）。確認が出ている間は合図が来ないので、既定の 2.5 秒では「次へ」を押す前に fallback になり、届いたのに案内が出た。そのため `planEscape` は Android の Instagram で `graceMs: 10000` を返す
+- Instagram のメニュー（「⋮」→「Chrome で開く」）は、`reloadWithTicket` で読み込み直したあとでも、最初に開いたリンクの URL を渡す。券は届かない（2回試して2回とも券なし）。Android の Instagram ではメニューは代わりにならない。ボタンが効かなかったとき（確認で「キャンセル」を押したなど）は、`planEscape` が `fallback: { kind: 'retry' }` を返し、ホストは「もう一度ボタンを押して『次へ』」と案内する（読み込み直さない）
 
 **Android のホーム画面アプリ**: ホーム画面に追加したアプリ（WebAPK）は、そのサイトの URL を引き取る。外のブラウザを開いたつもりでも、追加済みならホーム画面アプリが開く。Chrome と保存領域が同じなので、引換券が届けば困らない。
 
@@ -119,6 +120,10 @@ flowchart LR
 Android の LINE（26.15.1）では、押してから約 50ms で `visibilitychange`（hidden）が来た。Android は裏に回ったページのタイマーを止めずに約1秒ごとに動かすので、タイマーの遅れの合図も出る。
 
 猶予（既定 2,500ms）のうちに合図が来なければ、代わり（メニューの案内）は1回だけ出す。次の方法を自動で試し続けることはしない。
+
+**合図だけでは「外のブラウザに移った」と言い切れない（2026-10-16、Android の Instagram で確認）**: 合図はどれも「このページが隠れた」というだけなので、利用者がほかのアプリに切り替えても opened になる。猶予を長くすると（Instagram は 10 秒）、間違える機会も増える。そのためホストは、opened のあと元のページに戻ってきたら、券を照会（`peek`）して確かめる。外のブラウザが受け取っていれば券は使用済み（`used`）になっている。`startRedemption` は、同じ主体がいて何もしないとき（図2の D1）も券を使用済みにするので、どの結果でも `used` になる。戻ってしばらく（デモは 4 秒）経っても `valid` のままなら、届いていないので代わりを案内する。
+
+**券は押す前に用意し、使い回す**: 押してから券の発行を待つと、Instagram は確認の画面も出さずに何もしなかった（2回）。opened のあとも券は捨てずに使い回し、照会で使用済みと分かってから次の券を用意する。期限が近づいたら、押される前に作り直しておく。
 
 Instagram の `extbrowser` は、読み込み後のスクリプトからの遷移を無視する。そのため実際のタップの中で呼ぶ（`escapeToBrowser` はクリックの処理の中で呼ぶことを前提にする）。
 
@@ -195,7 +200,10 @@ interface MenuHint {
 }
 interface EscapePlan {
   step: EscapeStep;
-  fallback: { kind: 'menu'; app: InAppName; platform: Platform; menu: MenuHint | null };
+  fallback:
+    | { kind: 'menu'; app: InAppName; platform: Platform; menu: MenuHint | null } // メニューから開いてもらう（reloadWithTicket してから）
+    | { kind: 'retry'; app: InAppName; platform: Platform };                     // メニューでは届かない。もう一度ボタンを押してもらう（Android の Instagram）
+  graceMs?: number; // 合図を待つ時間の目安。開く前にアプリが確認を出すとき長め（Android の Instagram は 10 秒）
 }
 function planEscape(context: BrowserContext, targetUrl: string): EscapePlan;
 
@@ -225,13 +233,36 @@ function reloadWithTicket(ticket: string, opts?: { param?: string }): void;
 // URL から消す（LINE の openExternalBrowser も）。ボタン1つで開けたとき、受け取ったとき、捨てたときに呼ぶ。
 function clearTicketFromAddressBar(param?: string): void;
 
+// アプリ内ブラウザから外へ出す流れをまとめたもの（A1・A2・A4・A5）。ホストは state を見て描き、ボタンで press を呼ぶだけ。
+// 券の用意と作り直し、ボタンで開く、戻ってからの照会（1・3・6 秒の3回、1回押すごとに6回まで）、代わりの案内を受け持つ。
+// 4章の「券は押す前に用意し、使い回す」「届く途中で次を発行しない」「戻ったら peek で確かめる」はここに入っている。
+// state: idle / opening / checking / arrived / menu / retry / unknown / issue-failed
+// menu は、読み込み直す前（reloaded: false）と後（true）がある。読み込み直すと画面の状態が消えるので、ホストが prepareMenu を呼んだときだけ読み込み直す
+// （自動で開く手段が無いアプリでボタンが押されたときは、押されたのが案内を見るためなので、すぐ読み込み直す）。
+// 券の発行と作り直しは、ページが表に出ているときだけ。arrived のあとは、また押されるまで発行しない。
+interface EscapeFlowHost {
+  issue(): Promise<{ ticket: string; expiresAt: number }>; // ホストの API を呼ぶ（用途 escape）
+  peek(ticket: string): Promise<TicketLookup>;
+}
+function createEscapeFlow(host: EscapeFlowHost, opts: {
+  context: BrowserContext;
+  owner?: string;    // 券の持ち主。保存した券の持ち主と違えば使わない
+  resume?: string;   // startRedemption が escapePending を返したときの券。メニューの案内から始める
+  targetUrl?: () => string; param?: string;
+  onChange?: (state: EscapeState) => void; onLog?: (message: string) => void;
+}): {
+  state: EscapeState; getState(): EscapeState; subscribe(fn: (s: EscapeState) => void): () => void; // React の useSyncExternalStore に渡せる
+  plan: EscapePlan; press(): Promise<void>; prepareMenu(): Promise<void>; dispose(): void;
+};
+
 // <link rel="manifest"> を引換券付きの manifest URL に差し替える（B1）。
 function overrideManifest(manifestUrl: string): () => void; // 戻す関数を返す
 
 // 起動時の受け取りの流れをまとめたもの。ホストは関数を渡すだけ。
-interface RedemptionHost<Credential> {
-  deviceSubject(): Promise<{ id: string; hasRecords: boolean } | null>;
-  peek(ticket: string): Promise<{ status: TicketStatus; subjectId?: string }>; // ホストの API を呼ぶ
+// Info は選ぶ画面に並べる概要（レベル・遊んだ回数など）。キットは中を見ずに、結果の deviceInfo・ticketInfo へ通す。
+interface RedemptionHost<Credential, Info = unknown> {
+  deviceSubject(): Promise<{ id: string; hasRecords: boolean; info?: Info } | null>;
+  peek(ticket: string): Promise<{ status: TicketStatus; subjectId?: string; info?: Info }>; // ホストの API を呼ぶ
   redeem(ticket: string): Promise<Credential>;  // ホストの API を呼び、資格情報を受け取って保存する
   discard?(ticket: string): Promise<void>;      // ホストの API を呼び、引換券を使用済みにする。無ければ端末に「知らせ済み」と控えるだけ
   wasNotified(ticket: string): boolean;
@@ -240,7 +271,8 @@ interface RedemptionHost<Credential> {
 // URL に引換券が無ければ null。決着済み（wasNotified）なら照会せずに noop。
 // reloadWithTicket で読み込み直したページなら、受け取らず券も消さずに escapePending: true（ホストはメニューの案内をもう一度出す）。
 // noop・notify のときは URL から引換券を消す。adopt・choose のときは settleTicket が消す。
-function startRedemption<C>(host: RedemptionHost<C>, opts?: { url?: string; param?: string }): Promise<{ ticket: string; decision: RedemptionDecision; escapePending?: true } | null>;
+// 端末の ID を使うほかの処理（記録の同期、流入の記録など）より先に呼ぶ。
+function startRedemption<C, I>(host: RedemptionHost<C, I>, opts?: { url?: string; param?: string }): Promise<{ ticket: string; decision: RedemptionDecision; escapePending?: true; deviceInfo?: I; ticketInfo?: I } | null>;
 
 // adopt のとき、または choose で利用者が選んだあとに呼ぶ。
 // 'take' は host.redeem、'keep' は host.discard を呼び、どちらも決着済みと控えて URL から引換券を消す。
@@ -315,7 +347,8 @@ URL に付けた引換券は、利用者が「リンクをコピー」や共有�
 
 - 今のページの URL に券を付けるのは、メニューの案内を出すときだけ（`reloadWithTicket`）。ボタン1つで開けたら、すぐ URL から消す。
 - `escape` の期限を 5分にする。
-- `Referrer-Policy: no-referrer` で、Referer から券が漏れないようにする。ホストがヘッダーで付ける（キットの README で必須として書く）。
+- 他のオリジンへの Referer に query を乗せない。`Referrer-Policy: strict-origin-when-cross-origin`（ブラウザの既定）で足りる。`no-referrer` は広告の配信に響くことがあるので求めない（2026-10-16、GeoCutter のレビューで見直した）。
+- 同じオリジンの iframe（広告枠など）には、`Referrer-Policy` に関係なく親ページの URL がそのまま `document.referrer` に入り、枠の中の第三者のスクリプトが読める。ホストは、URL に券がある間（受け取る前と `escapePending` の間）は広告枠を出さないか、iframe に `referrerpolicy="origin"` を付ける。
 
 それでも確認を挟みたいホストは、`adopt` のときに自分で確認の画面を出してから `settleTicket` を呼べばよい。
 
@@ -326,9 +359,9 @@ URL に付けた引換券は、利用者が「リンクをコピー」や共有�
 | `POST /api/handoff/issue` | 今の `userIdentity` を確かめ、匿名なら `issue(userId, purpose)`。ログイン済みなら拒否（ログインで移す） |
 | `POST /api/handoff/peek` | `peek` の結果に、主体の概要（レベル・遊んだ回数）を足して返す |
 | `POST /api/handoff/redeem` | 「引き継ぐ」なら `redeem` し、その `userId` に新しい `clientToken` を発行して返す。「今のまま」なら `discard` する（入口を増やさないため、同じ入口で受ける） |
-| `Referrer-Policy: no-referrer` | 全ページのヘッダーに付ける（券の漏れ対策） |
-| `GET /manifest.webmanifest?handoff=` | `renderManifest` で `start_url` を `/play?handoff=…` にして返す |
-| 保存先 | Supabase の `handoff_tickets` 表（`consume` は条件付き UPDATE で原子的に） |
+| 券の漏れ対策 | `Referrer-Policy` は今の `strict-origin-when-cross-origin` のまま。URL に券がある間は、同じオリジンの広告枠（`/admax-frame.html`）を出さないか `referrerpolicy="origin"` にする |
+| `GET /manifest.webmanifest?handoff=` | `renderManifest` で `start_url` を `/play?handoff=…` にして返す。本番の `run_worker_first` に `/manifest.webmanifest` を足す（足さないと静的な manifest が返り、本番だけ B1 が効かない） |
+| 保存先 | Supabase の `handoff_tickets` 表（`consume` は条件付き UPDATE で原子的に）。表と実装の例は [`postgres.ja.md`](postgres.ja.md) |
 | 画面 | 「Safari で続きから遊ぶ」ボタン、メニューの図、選ぶ画面、知らせ |
 
 ホストが決めること（キットの選択肢として出す）: ログイン済みを移すか、完走0回を「記録なし」とみなすか、ログイン済みの端末でも選ぶ画面を出すか、切り替え前の ID を控えるか、お気に入りを `payload` で運ぶか。

@@ -100,6 +100,15 @@ describe('planEscape', () => {
     });
   });
 
+  it('Android Instagram はメニューで券が届かないので、もう一度ボタンを押してもらう', () => {
+    expect(planEscape(inApp('android', 'instagram'), target).fallback).toEqual({ kind: 'retry', app: 'instagram', platform: 'android' });
+  });
+
+  it('Android Instagram は確認が出るので長めに待つ', () => {
+    expect(planEscape(inApp('android', 'instagram'), target).graceMs).toBe(10_000);
+    expect(planEscape(inApp('android', 'line'), target).graceMs).toBeUndefined();
+  });
+
   it('Android X は自動で開かない（メニューに任せる）', () => {
     expect(planEscape(inApp('android', 'x'), target).step).toEqual({ kind: 'none' });
   });
@@ -119,11 +128,11 @@ describe('planEscape', () => {
       platform: 'ios',
       menu: { opener: 'more', item: 'open-in-browser' },
     });
-    expect(planEscape(inApp('android', 'line'), target).fallback.menu).toEqual({
-      opener: 'more',
-      item: 'open-in-browser',
+    expect(planEscape(inApp('android', 'line'), target).fallback).toMatchObject({
+      kind: 'menu',
+      menu: { opener: 'more', item: 'open-in-browser' },
     });
-    expect(planEscape(inApp('ios', 'tiktok'), target).fallback.menu).toBeNull();
+    expect(planEscape(inApp('ios', 'tiktok'), target).fallback).toMatchObject({ kind: 'menu', menu: null });
   });
 
   it('アプリ内ブラウザでなければ何もしない', () => {
