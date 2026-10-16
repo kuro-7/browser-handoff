@@ -16,6 +16,8 @@
 npm run logs -- 30
 ```
 
+デモは誰でも開けるので、ほかの人の記録も混ざる。端末が2つ以上あると端末の一覧だけを出すので、`--device`（端末の頭の文字、カンマ区切り）か `--ua`（ブラウザの名乗りに含まれる語。例 `SCG13`）で絞る。全部見るなら `--all`。出す行は既定で 300 まで（`--max`）。
+
 送れないときのために「記録をコピー」も残してある（直近30分の分）。
 
 「アカウント」は乱数の ID と記録の数を localStorage に置くだけ。記録の数は券の `payload` に乗せて運ぶ。
@@ -30,7 +32,8 @@ npm run logs -- 30
 | `functions/manifest.webmanifest.ts` | `GET /manifest.webmanifest?handoff=…`。start_url に券を入れて返す |
 | `server/kvStore.ts` | 保存先（Workers KV）。KV が無ければメモリに置く |
 | `server/log.ts` | `POST /api/log`。ページの記録を KV に置く |
-| `scripts/logs.mjs` | `npm run logs`。KV の記録を時刻順に並べる |
+| `scripts/logs.mjs` | `npm run logs`。KV の記録を時刻順に並べる（端末で絞れる） |
+| `scripts/switch.mjs` | `npm run demo:on`・`demo:off`。デモを開ける・止める |
 
 デモなので認証は無い。主体の ID は端末が送ってきたものをそのまま信じる。KV には条件付きの書き込みが無いので、`consume` は原子的でない（本番では使わない）。
 
@@ -54,11 +57,19 @@ http://localhost:8788 で開く。KV はローカルのものが使われる。
 
 出ている場所: https://browser-handoff-demo.pages.dev
 
-Pages のプロジェクト `browser-handoff-demo` と KV の `HANDOFF_KV` は作ってあり、id は `wrangler.toml` に入っている。直したら:
+Pages のプロジェクト `browser-handoff-demo` と KV の `HANDOFF_KV` は作ってあり、id は `wrangler.toml` に入っている。
+
+**ふだんは止めておく。** デモは誰でも開けて、API（Pages Functions）は断る処理も1回の実行として数えられる。bot に連打されると料金がかかるので、ふだんは API の無い「停止中」のページだけを出しておき、試すときだけ開ける。静的なページは何回開かれても料金がかからない。
 
 ```bash
-npm run deploy
+npm run demo:on
 ```
+
+```bash
+npm run demo:off
+```
+
+どちらも、出したもの以外のデプロイを消す。Pages は過去のデプロイも個別の URL（`<id>.browser-handoff-demo.pages.dev`）で動き続けるので、残すと止めたことにならない。試し終わったら必ず `demo:off` に戻す。
 
 ログインが切れていたら、先に `npx wrangler login`。
 
