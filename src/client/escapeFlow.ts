@@ -123,6 +123,8 @@ const RESUME_LEFT_MS = 4 * 60_000;
 export const ARRIVAL_CHECKS_MS: readonly number[] = [1_000, 3_000, 6_000];
 // 裏と表を行き来すると見張り直すが、1回押すごとの照会はこれまで。
 const MAX_PEEKS = 6;
+// メニューの案内のため読み込み直したあと、前面に戻るたびに照会する。押されないので、流れ全体での上限にする。
+const MAX_MENU_PEEKS = 12;
 
 interface Saved extends IssuedTicket {
   owner: string | null;
@@ -241,8 +243,9 @@ export function createEscapeFlow(host: EscapeFlowHost, opts: EscapeFlowOptions):
   };
 
   const settleArrival = (status: TicketStatus) => {
-    // 使われた（または使えなくなった）券は使い回せない。
+    // 使われた（または使えなくなった）券は使い回せない。メニューの案内のために URL に付けた券も消す。
     keep(null);
+    clearTicketFromAddressBar(param);
     if (status === 'used') {
       log('届いた（券が使用済みになった）');
       resting = true;
@@ -298,6 +301,50 @@ export function createEscapeFlow(host: EscapeFlowHost, opts: EscapeFlowOptions):
     document.addEventListener('visibilitychange', onVisibility);
     stopArrival = stop;
     schedule();
+  };
+
+  /**
+   * メニューの案内のため読み込み直したあと（`menu` で `reloaded: true`）。利用者がメニューから外のブラウザへ移り、
+   * 戻ってきたら、券が使われたか照会する。使われていれば `arrived`、使えなくなっていれば `unknown`、まだなら `menu` のまま。
+   * 合図（visibilitychange）を確実に出さない WebView もあるので、focus・pageshow でも見る。
+   */
+  let menuPeeks = 0;
+  const watchMenuReturn = (t: IssuedTicket) => {
+    let timers: number[] = [];
+    const clear = () => {
+      timers.forEach((id) => window.clearTimeout(id));
+      timers = [];
+    };
+    const stop = () => {
+      clear();
+      document.removeEventListener('visibilitychange', onReturn);
+      window.removeEventListener('focus', onReturn);
+      window.removeEventListener('pageshow', onReturn);
+      stopArrival = null;
+    };
+    const check = async () => {
+      if (stopArrival !== stop || menuPeeks >= MAX_MENU_PEEKS) return;
+      menuPeeks += 1;
+      let status: TicketStatus;
+      try {
+        status = (await host.peek(t.ticket)).status;
+      } catch (e) {
+        log(`照会できなかった: ${String(e)}`);
+        return;
+      }
+      if (stopArrival !== stop || status === 'valid') return;
+      stop();
+      settleArrival(status);
+    };
+    const onReturn = () => {
+      clear();
+      if (!visible() || menuPeeks >= MAX_MENU_PEEKS) return;
+      timers = ARRIVAL_CHECKS_MS.map((ms) => window.setTimeout(() => void check(), ms));
+    };
+    document.addEventListener('visibilitychange', onReturn);
+    window.addEventListener('focus', onReturn);
+    window.addEventListener('pageshow', onReturn);
+    stopArrival = stop;
   };
 
   /** 期限に余裕のある券。無ければ発行を待つ。 */
@@ -364,6 +411,7 @@ export function createEscapeFlow(host: EscapeFlowHost, opts: EscapeFlowOptions):
         ? { kind: 'menu', fallback: plan.fallback, reason, reloaded: true }
         : { kind: 'retry', fallback: plan.fallback, reason };
     log('メニューの案内の続き');
+    if (state.kind === 'menu') watchMenuReturn(t);
   } else if (usable) {
     keep({ ticket: usable.ticket, expiresAt: usable.expiresAt });
   } else {

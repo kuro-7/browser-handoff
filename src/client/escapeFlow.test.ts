@@ -189,6 +189,93 @@ describe('createEscapeFlow', () => {
     expect(host.issued).toBe(1);
   });
 
+  describe('読み込み直したあと、メニューから外のブラウザへ移って戻ってきたとき', () => {
+    async function resumeMenu(host: ReturnType<typeof fakeHost>, navigate = vi.fn()) {
+      history.replaceState(null, '', `https://example.com/play?handoff=${T1}`);
+      flow = createEscapeFlow(host, { context: x, resume: T1, navigate });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(flow.state).toMatchObject({ kind: 'menu', reloaded: true });
+      return flow;
+    }
+
+    it('使用済みなら arrived になり、URL の券を消す', async () => {
+      const host = fakeHost(['valid', 'used']);
+      const f = await resumeMenu(host);
+      setVisible(false);
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(host.peeks).toBe(0); // 裏にいる間は聞かない
+      setVisible(true);
+      await vi.advanceTimersByTimeAsync(3_000);
+      expect(host.peeks).toBe(2);
+      expect(f.state).toEqual({ kind: 'arrived' });
+      expect(location.href).toBe('https://example.com/play');
+      expect(f.ticket).toBeNull();
+    });
+
+    it('まだ使われていなければ menu のまま。もう一度戻ってきたらまた照会する', async () => {
+      const host = fakeHost(['valid', 'valid', 'valid', 'used']);
+      const f = await resumeMenu(host);
+      setVisible(false);
+      setVisible(true);
+      await vi.advanceTimersByTimeAsync(6_000);
+      expect(host.peeks).toBe(3);
+      expect(f.state).toMatchObject({ kind: 'menu', reloaded: true });
+      setVisible(false);
+      setVisible(true);
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(f.state).toEqual({ kind: 'arrived' });
+    });
+
+    it('focus（visibilitychange を出さない WebView）でも照会する', async () => {
+      const host = fakeHost(['used']);
+      const f = await resumeMenu(host);
+      window.dispatchEvent(new Event('focus'));
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(f.state).toEqual({ kind: 'arrived' });
+    });
+
+    it('期限が切れていたら unknown（もう一度押してもらう）', async () => {
+      const host = fakeHost(['expired']);
+      const f = await resumeMenu(host);
+      setVisible(false);
+      setVisible(true);
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(f.state).toEqual({ kind: 'unknown', status: 'expired' });
+    });
+
+    it('照会は流れ全体で 12 回まで。照会できなくても menu のまま', async () => {
+      const host = fakeHost();
+      const f = await resumeMenu(host);
+      for (let i = 0; i < 6; i += 1) {
+        setVisible(false);
+        setVisible(true);
+        await vi.advanceTimersByTimeAsync(6_000);
+      }
+      expect(host.peeks).toBe(12);
+      expect(f.state).toMatchObject({ kind: 'menu', reloaded: true });
+
+      const failing = fakeHost();
+      failing.peek = () => Promise.reject(new Error('down'));
+      f.dispose();
+      const g = await resumeMenu(failing);
+      setVisible(false);
+      setVisible(true);
+      await vi.advanceTimersByTimeAsync(6_000);
+      expect(g.state).toMatchObject({ kind: 'menu', reloaded: true });
+    });
+
+    it('押し直したら、メニューの見張りは止まる', async () => {
+      const host = fakeHost();
+      const f = await resumeMenu(host, vi.fn());
+      void f.press();
+      await vi.advanceTimersByTimeAsync(0);
+      const before = host.peeks;
+      window.dispatchEvent(new Event('focus'));
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(host.peeks).toBe(before);
+    });
+  });
+
   it('保存した券の持ち主が違えば使わない', async () => {
     const host = fakeHost();
     flow = createEscapeFlow(host, { context: line, owner: 'u1', navigate: () => {} });
