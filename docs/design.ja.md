@@ -94,6 +94,36 @@ iOS の Chrome は、Safari ともアプリ内ブラウザとも保存領域が�
 - 要確認: X・LINE・Instagram の iOS のアプリ内ブラウザから `googlechromes://` へ移れるか（アプリが知らないスキームを止めることがある）、移る前に確認が出るか、Chrome が開いたときに合図が来るか
 - Android は `intent://` で既定のブラウザ（Chrome 派なら Chrome）が開くので、別の開き方は出さない
 
+### iOS で「ふだん使いのブラウザ」を開けるか（A1、要実機確認）
+
+方針（2026-10-16、GeoCutter）: iOS でも、Safari か Chrome かを選ばせるより、ふだん使いのブラウザを開きたい。`alternatives.chrome` は残すが、GeoCutter は使わない。
+
+調べたこと（実機ではまだ確かめていない）:
+
+- ページから「ふだん使いのブラウザ」を名指しせずに開く URL スキームは無い。`x-safari-https://` は Safari、`googlechromes://` は Chrome を名指しで開くだけ。ふだん使いのブラウザが開くのは、アプリが OS に https の URL を渡したとき（`UIApplication.open`）だけで、アプリ内ブラウザのページからはそれを呼べない。Apple は「Safari を名指しで開く」公式の方法も出していない（`x-safari-https://` は非公開の仕組みで、将来変わりうる）。
+- LINE の `openExternalBrowser=1`: LINE が OS に渡すので、ふだん使いのブラウザが開くと書いている記事が多い（公式の説明は見つけていない）。
+- Instagram・Threads の `extbrowser`: 説明が見つからない。中身が `UIApplication.open` なら、ふだん使いのブラウザが開く。
+- X の iOS のアプリ内ブラウザは SFSafariViewController と言われる。その中の「Safari で開く」に当たるボタンが、ふだん使いのブラウザを開くかは、調べた範囲では分からなかった。
+
+いまの既定（`planEscape` の iOS）と、そう決めた理由:
+
+| アプリ | ボタンで開く方法 | `plan.browser` |
+|---|---|---|
+| LINE | `openExternalBrowser=1` で読み込み直す | `default` |
+| Instagram・Threads | `instagram://extbrowser/`・`barcelona://extbrowser/` | `default` |
+| X・その他 | `x-safari-https://`（Safari） | `safari` |
+
+- ふだん使いのブラウザへ渡す方法があるアプリでは、それを使う。
+- 無いアプリ（X など）は、今のまま Safari を開く。ボタンを押せば確実に外のブラウザへ出られて、券もそこで届く。メニューの案内に回すと手順が増えるうえ、そのメニューがふだん使いのブラウザを開くかも分かっていない。Chrome 派の人は、Safari に記録が移り、あとで Chrome で開くと最初からになる。ここは受け入れる。
+- 実機で、X のメニューがふだん使いのブラウザを開くと分かったら、X は「ボタンでは開かず、メニューを案内する」に変えるか考え直す。
+
+実機で確かめること（ふだん使いのブラウザを Chrome にした iPhone で）:
+
+1. LINE の `openExternalBrowser=1` で開くのは Chrome か Safari か。
+2. Instagram・Threads の `extbrowser` で開くのは Chrome か Safari か。
+3. X のアプリ内ブラウザのメニュー（共有・「Safari で開く」など）で開くのは Chrome か Safari か。ボタンの文言も記録する。
+4. どれも、開いた先で券が届くか（デモの「届いた」表示）。
+
 ### アプリのメニュー（A2・A5、要確認）
 
 各アプリの「ブラウザで開く」メニューの場所。覚えている範囲で書いたもので、確かめたものには（確認: 日付・版）を付けた。8章のデモページで確かめてから、キットが返す手順のデータにする。版によって変わるので、データには確かめた日と版を残す。
