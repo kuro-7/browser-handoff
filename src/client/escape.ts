@@ -1,4 +1,4 @@
-import type { EscapePlan } from '../core/escape.js';
+import type { EscapeBrowser, EscapePlan } from '../core/escape.js';
 
 export const DEFAULT_GRACE_MS = 2500;
 
@@ -12,6 +12,13 @@ export interface EscapeOptions {
   graceMs?: number;
   /** 移り方。既定は `location.href` への代入。テストや特殊な開き方のため。 */
   navigate?: (href: string) => void;
+  /** `plan.alternatives` から選んだブラウザで開く（iOS の Chrome など）。無ければ `plan.step`。 */
+  browser?: Exclude<EscapeBrowser, 'default'>;
+}
+
+/** 選んだブラウザで開くときの手順。選んだものが計画に無ければ `plan.step`。 */
+export function stepFor(plan: EscapePlan, browser?: Exclude<EscapeBrowser, 'default'>): EscapePlan['step'] {
+  return (browser && plan.alternatives?.[browser]) || plan.step;
 }
 
 /**
@@ -22,7 +29,7 @@ export interface EscapeOptions {
  * 結果待ちの間に何かを表示するかはホストが決める。
  */
 export function escapeToBrowser(plan: EscapePlan, opts: EscapeOptions = {}): Promise<'opened' | 'fallback'> {
-  const { step } = plan;
+  const step = stepFor(plan, opts.browser);
   if (step.kind === 'none') return Promise.resolve('fallback');
 
   const graceMs = opts.graceMs ?? plan.graceMs ?? DEFAULT_GRACE_MS;

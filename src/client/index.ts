@@ -1,4 +1,4 @@
-export { DEFAULT_GRACE_MS, escapeToBrowser, type EscapeOptions } from './escape.js';
+export { DEFAULT_GRACE_MS, escapeToBrowser, stepFor, type EscapeOptions } from './escape.js';
 export {
   clearTicketFromAddressBar,
   reloadWithTicket,
@@ -11,6 +11,8 @@ export {
   type EscapeFlowHost,
   type EscapeFlowOptions,
   type EscapeMissReason,
+  type EscapePressOptions,
+  type PickedBrowser,
   type EscapeState,
   type IssuedTicket,
 } from './escapeFlow.js';

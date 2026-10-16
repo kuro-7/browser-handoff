@@ -100,6 +100,23 @@ describe('planEscape', () => {
     });
   });
 
+  it('iOS は Safari で開き、Chrome でも開けるようにする（Chrome は Safari と保存領域が別）', () => {
+    const plan = planEscape(inApp('ios', 'x'), target);
+    expect(plan.browser).toBe('safari');
+    expect(plan.alternatives).toEqual({ chrome: { kind: 'navigate', href: 'googlechromes://example.com/play?level=3' } });
+    expect(planEscape(inApp('ios', 'x'), 'http://localhost:5173/').alternatives?.chrome).toEqual({
+      kind: 'navigate',
+      href: 'googlechrome://localhost:5173/',
+    });
+    expect(planEscape(inApp('ios', 'instagram'), target).browser).toBe('default');
+  });
+
+  it('Android は既定のブラウザで開き、別のブラウザは出さない', () => {
+    const plan = planEscape(inApp('android', 'line'), target);
+    expect(plan.browser).toBe('default');
+    expect(plan.alternatives).toBeUndefined();
+  });
+
   it('Android Instagram はメニューで券が届かないので、もう一度ボタンを押してもらう', () => {
     expect(planEscape(inApp('android', 'instagram'), target).fallback).toEqual({ kind: 'retry', app: 'instagram', platform: 'android' });
   });

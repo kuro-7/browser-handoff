@@ -50,9 +50,10 @@ React なら `useSyncExternalStore(flow.subscribe, flow.getState)` でそのま�
 
 | `state.kind` | 出すもの（例） |
 |---|---|
-| `idle` | ボタン。`flow.plan.step.kind === 'none'` なら「ブラウザで開く方法を見る」 |
+| `idle` | ボタン。`flow.plan.step.kind === 'none'` なら「ブラウザで開く方法を見る」。`flow.plan.alternatives?.chrome` があれば（iOS）、「Chrome で開く」ボタンも出し、`flow.press({ browser: 'chrome' })` を呼ぶ |
 | `opening`・`checking` | 「開いています…」 |
 | `arrived` | 「ブラウザで続きを遊べます」 |
+| 届かなかった状態の `browser: 'chrome'` | Chrome が入っていないかもしれない。「Safari で開く」を勧める（同じ券のまま押し直せる） |
 | `menu`（`reloaded: false`） | 「メニューから開く方法を見る」ボタン。押されたら `flow.prepareMenu()`（券付きの URL で読み込み直す）。読み込み直すと画面の状態が消えるので、キットは勝手には読み込み直さない（自動で開く手段が無いアプリでボタンが押されたときだけ、すぐ読み込み直す） |
 | `menu`（`reloaded: true`） | 読み込み直したあと（`resume`）。`state.fallback.menu` を見て、アプリのメニューの場所を案内する |
 | `retry` | 「もう一度ボタンを押して、確認で『次へ』」 |

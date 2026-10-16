@@ -20,6 +20,7 @@ import {
 import {
   DEFAULT_GRACE_MS,
   createEscapeFlow,
+  stepFor,
   overrideManifest,
   settleTicket,
   startRedemption,
@@ -29,6 +30,7 @@ import {
   type RedemptionHost,
   type StartRedemptionResult,
 } from '../../src/client/index.js';
+import { measureCard } from './measure.js';
 
 // ---------- 端末に置くもの ----------
 
@@ -396,6 +398,8 @@ const graceInput = h('input', { type: 'number', placeholder: '自動', min: '0',
 const planView = h('div');
 const ticketView = h('span', { class: 'note' });
 const escapeButton = h('button', { class: 'primary', id: 'escape-button' }, '外のブラウザで開く');
+// iOS の Chrome（plan.alternatives.chrome があるときだけ出す）。Chrome は Safari と保存領域が別。
+const chromeButton = h('button', { id: 'escape-chrome', style: 'width:100%;margin-top:8px' }, 'Chrome で開く');
 const escapeResult = h('div');
 const escapeIntro = h('p');
 
@@ -466,7 +470,8 @@ function currentPlan(): EscapePlan {
 function renderPlan(): void {
   const plan = currentPlan();
   const auto = plan.step.kind === 'navigate';
-  fill(escapeButton, auto ? '外のブラウザで開く' : 'ブラウザで開く方法を見る');
+  fill(escapeButton, !auto ? 'ブラウザで開く方法を見る' : plan.browser === 'safari' ? 'Safari で開く' : '外のブラウザで開く');
+  chromeButton.style.display = plan.alternatives?.chrome ? '' : 'none';
   fill(
     escapeIntro,
     auto
@@ -477,6 +482,7 @@ function renderPlan(): void {
     planView,
     dl([
       ['開き方', plan.step.kind === 'navigate' ? h('code', {}, maskUrl(plan.step.href)) : 'なし（メニューから開いてもらう）'],
+      ['Chrome で開く', plan.alternatives?.chrome?.kind === 'navigate' ? h('code', {}, maskUrl(plan.alternatives.chrome.href)) : 'なし'],
       ['だめなとき', menuWords(plan.fallback)],
     ]),
   );
@@ -561,6 +567,7 @@ const MISS_TITLES: Record<EscapeMissReason, string> = {
 function renderEscapeState(s: EscapeState): void {
   record(`状態: ${s.kind}${'reason' in s ? `（${s.reason}）` : ''}`);
   escapeButton.disabled = s.kind === 'opening';
+  chromeButton.disabled = s.kind === 'opening';
   renderEscapeTicket();
   switch (s.kind) {
     case 'idle':
@@ -603,6 +610,7 @@ function renderEscapeState(s: EscapeState): void {
           status(
             'warn',
             MISS_TITLES[s.reason],
+            s.browser === 'chrome' ? h('p', {}, 'Chrome が入っていないかもしれません。上の「Safari で開く」も試せます。') : null,
             h('p', {}, 'アプリのメニューからなら開けます。'),
             h('button', { id: 'menu-button', onclick: () => void flow?.prepareMenu() }, 'メニューから開く方法を見る'),
             h('p', { class: 'note' }, '押すとページが一度読み込み直されます（記録は消えません）。'),
@@ -625,26 +633,28 @@ function renderEscapeState(s: EscapeState): void {
   }
 }
 
-function onEscapeClick(): void {
+function onEscapeClick(browser?: 'chrome'): void {
   flow ??= makeFlow(); // アプリ内ブラウザ以外で試すとき
   const t0 = Date.now();
   stopWatching?.();
   const plan = flow.plan;
+  const step = stepFor(plan, browser);
   record(
-    `ボタンを押した: 方法=${methodSelect.value} 猶予=${plan.graceMs ?? DEFAULT_GRACE_MS}ms${flow.ticket ? '' : '（券がまだ無い）'} → ${
-      plan.step.kind === 'navigate' ? maskUrl(plan.step.href) : 'なし'
+    `ボタンを押した: ${browser ?? plan.browser ?? '—'} 方法=${methodSelect.value} 猶予=${plan.graceMs ?? DEFAULT_GRACE_MS}ms${flow.ticket ? '' : '（券がまだ無い）'} → ${
+      step.kind === 'navigate' ? maskUrl(step.href) : 'なし'
     }`,
   );
   const watcher = watchSignals(t0);
   stopWatching = watcher.stop;
   firstSignal = watcher.first;
   // クリックの処理の中で、待たずに呼ぶ。
-  void flow.press().then(() => record(`press が終わった: ${Date.now() - t0}ms（最初の合図: ${watcher.first() ?? 'なし'}）`));
+  void flow.press(browser ? { browser } : {}).then(() => record(`press が終わった: ${Date.now() - t0}ms（最初の合図: ${watcher.first() ?? 'なし'}）`));
 }
 
 function escapeCard(): HTMLElement {
-  escapeButton.addEventListener('click', onEscapeClick);
-  return h('section', {}, h('h2', {}, '外のブラウザで開く'), escapeIntro, escapeButton, escapeResult);
+  escapeButton.addEventListener('click', () => onEscapeClick());
+  chromeButton.addEventListener('click', () => onEscapeClick('chrome'));
+  return h('section', {}, h('h2', {}, '外のブラウザで開く'), escapeIntro, escapeButton, chromeButton, escapeResult);
 }
 
 function escapeSettings(): HTMLElement {
@@ -1015,6 +1025,7 @@ async function main(): Promise<void> {
     inApp ? escapeCard() : receiveCard(),
     inApp ? null : homeMain ? homeCard() : null,
     logCard(),
+    measureCard(record),
     detailsCard([
       ...(inApp ? escapeExtras : [escapeCard(), ...escapeExtras]),
       ...(homeMain ? homeExtras : [homeCard(), ...homeExtras]),

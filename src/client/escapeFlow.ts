@@ -1,8 +1,8 @@
-import { planEscape, type EscapeFallback, type EscapePlan } from '../core/escape.js';
+import { planEscape, type EscapeBrowser, type EscapeFallback, type EscapePlan } from '../core/escape.js';
 import { DEFAULT_TICKET_PARAM, withTicket } from '../core/ticketUrl.js';
 import type { BrowserContext, TicketLookup, TicketStatus } from '../core/types.js';
 import { clearTicketFromAddressBar, reloadWithTicket } from './addressBar.js';
-import { escapeToBrowser } from './escape.js';
+import { escapeToBrowser, stepFor } from './escape.js';
 
 /** ホストの発行の API が返すもの（用途は `escape`）。 */
 export interface IssuedTicket {
@@ -38,13 +38,24 @@ export type EscapeState =
    * `reloaded: true` から始まるので、そこでメニューの場所を案内する。
    * `no-button`（自動で開く手段が無いアプリでボタンが押された）のときは、押されたのが案内を見るためのボタンなので、すぐ読み込み直す。
    */
-  | { kind: 'menu'; fallback: Extract<EscapeFallback, { kind: 'menu' }>; reason: EscapeMissReason; reloaded: boolean }
+  | { kind: 'menu'; fallback: Extract<EscapeFallback, { kind: 'menu' }>; reason: EscapeMissReason; reloaded: boolean; browser?: PickedBrowser }
   /** もう一度ボタンを押してもらう（メニューでは券が届かないアプリ）。 */
-  | { kind: 'retry'; fallback: Extract<EscapeFallback, { kind: 'retry' }>; reason: EscapeMissReason }
+  | { kind: 'retry'; fallback: Extract<EscapeFallback, { kind: 'retry' }>; reason: EscapeMissReason; browser?: PickedBrowser }
   /** 届いたか分からない（券が期限切れになった、照会できなかったなど）。もう一度押してもらう。 */
   | { kind: 'unknown'; status: TicketStatus }
   /** 押されたが、券を発行できなかった。 */
   | { kind: 'issue-failed'; error: unknown };
+
+/**
+ * `press` で選んだブラウザ（`plan.alternatives` のもの）。届かなかった状態にも入るので、ホストは
+ * 「Chrome が入っていないかもしれません。Safari で開く」のように、別のブラウザを勧められる。
+ */
+export type PickedBrowser = Exclude<EscapeBrowser, 'default'>;
+
+export interface EscapePressOptions {
+  /** `plan.alternatives` から選んだブラウザで開く（iOS の「Chrome で開く」など）。無ければ `plan.step`。 */
+  browser?: PickedBrowser;
+}
 
 export interface EscapeFlowOptions {
   context: BrowserContext;
@@ -79,8 +90,11 @@ export interface EscapeFlow {
   readonly plan: EscapePlan;
   /** 用意してある券（調べもの用）。無ければ null。 */
   readonly ticket: IssuedTicket | null;
-  /** ボタンが押されたとき。クリックの処理の中で、待たずに呼ぶこと（Instagram はタップ以外からの移動を無視する）。 */
-  press(): Promise<void>;
+  /**
+   * ボタンが押されたとき。クリックの処理の中で、待たずに呼ぶこと（Instagram はタップ以外からの移動を無視する）。
+   * `plan.alternatives` にあるブラウザ（iOS の Chrome など）を選ぶボタンなら、`{ browser: 'chrome' }` を渡す。
+   */
+  press(opts?: EscapePressOptions): Promise<void>;
   /**
    * メニューから開いても届くように、券付きの URL でページを読み込み直す。`menu` で `reloaded: false` のときに、
    * 利用者が案内を見ると決めたら呼ぶ（読み込み直すと画面の状態が消えるので、キットは勝手には呼ばない）。
@@ -210,16 +224,17 @@ export function createEscapeFlow(host: EscapeFlowHost, opts: EscapeFlowOptions):
     reloadWithTicket(t.ticket, { param, ...navigateOpts });
   };
 
-  const miss = (plan: EscapePlan, t: IssuedTicket, reason: EscapeMissReason) => {
+  const miss = (plan: EscapePlan, t: IssuedTicket, reason: EscapeMissReason, browser?: PickedBrowser) => {
     const { fallback } = plan;
+    const picked = browser ? { browser } : {};
     if (fallback.kind === 'retry') {
       // メニューでは券が届かないアプリ。読み込み直さず、同じ券のままもう一度押してもらう。
       log(`もう一度押してもらう（${reason}）`);
-      setState({ kind: 'retry', fallback, reason });
+      setState({ kind: 'retry', fallback, reason, ...picked });
       return;
     }
     keep(t, reason);
-    setState({ kind: 'menu', fallback, reason, reloaded: false });
+    setState({ kind: 'menu', fallback, reason, reloaded: false, ...picked });
     // 押されたのが「開く方法を見る」なら、すぐ読み込み直してよい。それ以外は、ホストが prepareMenu を呼ぶまで待つ。
     if (reason === 'no-button') reloadForMenu(t, reason);
     else log(`メニューの案内を待つ（${reason}）`);
@@ -239,7 +254,7 @@ export function createEscapeFlow(host: EscapeFlowHost, opts: EscapeFlowOptions):
     }
   };
 
-  const watchArrival = (plan: EscapePlan, t: IssuedTicket) => {
+  const watchArrival = (plan: EscapePlan, t: IssuedTicket, browser?: PickedBrowser) => {
     let timers: number[] = [];
     let peeks = 0;
     const clear = () => {
@@ -268,7 +283,7 @@ export function createEscapeFlow(host: EscapeFlowHost, opts: EscapeFlowOptions):
       } else if (last || peeks >= MAX_PEEKS) {
         stop();
         if (status === null) settleArrival('unknown');
-        else miss(plan, t, 'not-arrived');
+        else miss(plan, t, 'not-arrived', browser);
       }
     };
     // 表に出ているときだけ数える。裏に回ったら止め、戻ってきたら最初から（照会の回数には上限がある）。
@@ -299,28 +314,29 @@ export function createEscapeFlow(host: EscapeFlowHost, opts: EscapeFlowOptions):
     }
   };
 
-  const press = async () => {
+  const press = async (pressOpts: EscapePressOptions = {}) => {
     if (disposed || state.kind === 'opening') return;
+    const { browser } = pressOpts;
     stopArrival?.();
     resting = false;
 
     const t = await ensureTicket();
     if (t === null || disposed) return;
     const plan = planFor(t.ticket);
-    if (plan.step.kind === 'none') {
+    if (stepFor(plan, browser).kind === 'none') {
       miss(plan, t, 'no-button');
       return;
     }
     setState({ kind: 'opening' });
-    const result = await escapeToBrowser(plan, navigateOpts);
+    const result = await escapeToBrowser(plan, { ...navigateOpts, ...(browser ? { browser } : {}) });
     if (disposed) return;
-    log(`開いた結果: ${result}`);
+    log(`開いた結果: ${result}${browser ? `（${browser}）` : ''}`);
     if (result === 'opened') {
       clearTicketFromAddressBar(param);
       setState({ kind: 'checking' });
-      watchArrival(plan, t);
+      watchArrival(plan, t, browser);
     } else {
-      miss(plan, t, 'button-failed');
+      miss(plan, t, 'button-failed', browser);
     }
   };
 

@@ -3,6 +3,14 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <script>
+    // 「画面の寸法を測る」で viewport-fit=cover を外したとき（demo.fitCover = 0）。描く前に書き換える。
+    try {
+      if (localStorage.getItem('demo.fitCover') === '0') {
+        document.querySelector('meta[name="viewport"]').setAttribute('content', 'width=device-width, initial-scale=1');
+      }
+    } catch (e) {}
+  </script>
   <meta name="referrer" content="no-referrer">
   <title>browser-handoff デモ</title>
   <link rel="manifest" href="/manifest.webmanifest">
