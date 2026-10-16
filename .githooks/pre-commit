@@ -1,0 +1,3 @@
+#!/bin/sh
+# アカウント名がコミットに入らないようにする（demo/device/check_secrets.py）。
+exec python demo/device/check_secrets.py
