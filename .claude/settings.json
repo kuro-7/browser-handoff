@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(demo/device/accounts.json)",
+      "Bash(cat demo/device/accounts.json)",
+      "Bash(cat */accounts.json)",
+      "Bash(type demo/device/accounts.json)"
+    ]
+  }
+}

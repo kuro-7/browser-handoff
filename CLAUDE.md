@@ -1,0 +1,1 @@
+- clone したら `git config core.hooksPath .githooks` を一度流す（コミットにアカウント名が入らないか確かめる）。

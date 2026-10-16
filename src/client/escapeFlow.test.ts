@@ -9,6 +9,7 @@ const T2 = 'BBBBBBBBBBBBBBBBBBBBBB';
 const line: BrowserContext = { platform: 'android', kind: 'in-app', app: 'line', storage: 'separate' };
 const instagram: BrowserContext = { platform: 'android', kind: 'in-app', app: 'instagram', storage: 'separate' };
 const x: BrowserContext = { platform: 'android', kind: 'in-app', app: 'x', storage: 'separate' };
+const iosX: BrowserContext = { platform: 'ios', kind: 'in-app', app: 'x', storage: 'separate' };
 
 function setVisible(visible: boolean) {
   Object.defineProperty(document, 'visibilityState', { value: visible ? 'visible' : 'hidden', configurable: true });
@@ -249,5 +250,47 @@ describe('createEscapeFlow の subscribe', () => {
     off();
     await flow.press();
     expect(seen).toEqual(['menu']);
+  });
+});
+
+describe('createEscapeFlow の Chrome（iOS）', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    sessionStorage.clear();
+    history.replaceState(null, '', 'https://example.com/play');
+    Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true });
+  });
+  afterEach(() => {
+    flow?.dispose();
+    flow = null;
+    vi.useRealTimers();
+  });
+
+  it('Chrome を選ぶと googlechromes:// で開き、届けば arrived', async () => {
+    const host = fakeHost(['used']);
+    const navigate = vi.fn(() => setVisible(false));
+    flow = createEscapeFlow(host, { context: iosX, navigate });
+    await vi.advanceTimersByTimeAsync(0);
+    await flow.press({ browser: 'chrome' });
+    expect(navigate).toHaveBeenCalledWith(`googlechromes://example.com/play?handoff=${T1}`);
+    setVisible(true);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(flow.state.kind).toBe('arrived');
+  });
+
+  it('Chrome が入っていない（合図が来ない）と、選んだブラウザ付きで「ボタンでは開けなかった」', async () => {
+    const host = fakeHost();
+    const navigate = vi.fn();
+    flow = createEscapeFlow(host, { context: iosX, navigate });
+    await vi.advanceTimersByTimeAsync(0);
+    const pressing = flow.press({ browser: 'chrome' });
+    await vi.advanceTimersByTimeAsync(2_500);
+    await pressing;
+    expect(flow.state).toMatchObject({ kind: 'menu', reason: 'button-failed', reloaded: false, browser: 'chrome' });
+    expect(navigate).toHaveBeenCalledTimes(1); // 勝手に読み込み直さない
+    // そのまま Safari で押し直せる（同じ券）。
+    void flow.press();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(navigate).toHaveBeenLastCalledWith(`x-safari-https://example.com/play?handoff=${T1}`);
   });
 });

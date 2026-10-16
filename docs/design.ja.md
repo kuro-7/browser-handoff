@@ -11,6 +11,8 @@ Web アプリを遊んでいる人が、保存領域の違う場所へ移ると�
 
 保存領域が同じ場所への移動（Android の Chrome → ホーム画面アプリ、Custom Tabs → Chrome など）では何もしない。
 
+**アプリ内ブラウザは、閉じると記録が消えることがある（2026-10-16、Android の X で確認）**: 匿名のアカウントで1回遊んだあと、引き継がずにアプリ内ブラウザを閉じ、同じリンクをもう一度 X のアプリ内ブラウザで開くと、最初からになった（localStorage などが残っていない）。少なくとも Android の X では、アプリ内ブラウザに置いた記録は「消えやすい」のではなく「閉じたら消える」。外のブラウザへ出す理由はこれで、ホストはボタンを目立たせてよい。LINE・Instagram・iOS で同じかは未確認。
+
 ### やらないこと
 
 - アカウントの中身を知ること。キットが扱うのは不透明な ID（`subjectId`）だけ。ID を資格情報（GeoCutter なら `clientToken`）に変えるのはホストの仕事。
@@ -70,7 +72,7 @@ flowchart LR
 
 | 経路 | キットがすること |
 |---|---|
-| A1（iOS・ボタン1つ） | `planEscape` がアプリごとの開き方を返す（X・WhatsApp・Telegram などは `x-safari-https://`、Instagram は `instagram://extbrowser/`、Threads は `barcelona://extbrowser/`、LINE は `openExternalBrowser=1`）。ホストのボタンのクリックの処理の中で `escapeToBrowser` が実行し、開けたかを判定する |
+| A1（iOS・ボタン1つ） | `planEscape` がアプリごとの開き方を返す（X・WhatsApp・Telegram などは `x-safari-https://`、Instagram は `instagram://extbrowser/`、Threads は `barcelona://extbrowser/`、LINE は `openExternalBrowser=1`）。ホストのボタンのクリックの処理の中で `escapeToBrowser` が実行し、開けたかを判定する。iOS では「Chrome で開く」（`googlechromes://`）も選べる（下の「iOS の Chrome」） |
 | A2（iOS・アプリのメニュー） | A1 が効かなかったとき、またはアプリに手段が無いとき、`fallback: menu` とアプリ名を返す。ホストはメニューの場所（下の表）を案内し、そのとき引換券付きの URL で読み込み直す（`reloadWithTicket`）。メニューから開いても届く |
 | A3（Android） | Custom Tabs 型と分かれば `storage: shared` を返し、引換券を出さない |
 | A4（Android・ボタン1つ） | `intent://…#Intent;scheme=https;end` で既定のブラウザを開く（X は `intent://` を開けないので除き、メニューに任せる）。A1 と同じく、ボタンのクリックの処理の中で呼ぶ |
@@ -78,6 +80,19 @@ flowchart LR
 | B1（iOS・Mac の Safari） | 追加の手順を出すときに引換券（`home-screen`）を発行し、`<link rel="manifest">` を引換券付きの URL に差し替える。サーバーは `start_url` に引換券を入れた manifest を返す。アプリの初回起動で受け取る。追加してから初めて開くまでに日が空くことがあるので、期限は長くする（6章） |
 | B2 | 届かなかったと分かったら（初回起動で端末に主体が無く、引換券も無い）、`fallback: host-login` を返す。ログインはホストの仕事 |
 | B3・B4 | `storage: shared` を返し、何もしない。追加のダイアログは pwa-install などに任せる（キットの範囲外） |
+
+### iOS の Chrome（A1、要確認）
+
+iOS の Chrome は、Safari ともアプリ内ブラウザとも保存領域が別。`x-safari-https://` はふだん使いのブラウザに関係なく Safari を開くので、Chrome をふだん使いにしている人は、記録が Safari に移り、そのあと Chrome で開くとまた最初からになる。iOS のページからは、ふだん使いのブラウザも、Chrome が入っているかも分からない。
+
+そのため、iOS では計画に別の開き方を持たせる。
+
+- `plan.browser`: `step` で開くブラウザ（`safari`・`default`）。`default` は、アプリが既定のブラウザに渡す方法（LINE の `openExternalBrowser`、Instagram・Threads の `extbrowser`）で、どのブラウザが開くかはアプリ次第（要確認）
+- `plan.alternatives.chrome`: `googlechromes://<host>/<path>`（http なら `googlechrome://`）
+- ホストは「Safari で開く」と「Chrome で開く」の2つのボタンを出せる。Chrome のボタンは `flow.press({ browser: 'chrome' })` を呼ぶ
+- Chrome が入っていないと、`googlechromes://` へ移っても何も起きず、合図が来ない。ふつうの「ボタンでは開けなかった」（`button-failed`）になり、状態に `browser: 'chrome'` が入る。ホストは「Chrome が入っていないかもしれません。Safari で開く」を勧めればよい。券は同じものを使い続けるので、続けて Safari のボタンを押しても届く
+- 要確認: X・LINE・Instagram の iOS のアプリ内ブラウザから `googlechromes://` へ移れるか（アプリが知らないスキームを止めることがある）、移る前に確認が出るか、Chrome が開いたときに合図が来るか
+- Android は `intent://` で既定のブラウザ（Chrome 派なら Chrome）が開くので、別の開き方は出さない
 
 ### アプリのメニュー（A2・A5、要確認）
 
@@ -97,6 +112,8 @@ flowchart LR
 
 **メニューから開いて届くのは、ボタンを押したあとだけ**: 券は、ボタンが効かなかったときに読み込み直して URL に付ける。ボタンを押さずにいきなりメニューから開くと、券は付いていないので届かない（2026-10-16、Android の Instagram で確認）。ホストは、メニューの案内より先にボタンを見せる。
 
+**X のメニューから Chrome へ移り、選ぶ画面が出た（2026-10-16、Android の X）**: GeoCutter の staging で、X のアプリ内ブラウザからメニュー（「⋮」→「ブラウザで開く」）で Chrome に移ると、Chrome 側にも記録があったので、図2の `choose`（どちらを使うか選ぶ画面）になった。iPhone ではまだ一度も確かめていない。
+
 **Android のボタン1つの実測（2026-10-16）**:
 
 - LINE: `openExternalBrowser=1` で Chrome が開き、届いた。確認の画面は出なかった
@@ -106,7 +123,48 @@ flowchart LR
 
 **Android のホーム画面アプリ**: ホーム画面に追加したアプリ（WebAPK）は、そのサイトの URL を引き取る。外のブラウザを開いたつもりでも、追加済みならホーム画面アプリが開く。Chrome と保存領域が同じなので、引換券が届けば困らない。
 
+**X のリンクも、ホーム画面アプリが引き取る（2026-10-16、Android の X で確認）**: そのサイトをホーム画面に追加している（WebAPK）と、X のリンクを押したとき、アプリ内ブラウザではなくホーム画面アプリが開いた。アンインストールすると、アプリ内ブラウザで開いた。X はリンクを開く前に、その URL を受け取るアプリがあるかを Android に聞いているとみられる。この場合、利用者は最初から Chrome と同じ保存領域にいるので、外へ出す必要は無い（キットは `detectContext` で standalone と判定し、ボタンを出さない）。LINE・Instagram で同じかは未確認。iPhone のホーム画面アプリはリンクを引き取らないので、iPhone では起きないはず（未確認）。
+
 メニューが無いアプリでボタン1つも効かなかったときは、ホストが「リンクをコピーしてブラウザに貼り付ける」を最後の手段として出してよい。そのときコピーする URL にも引換券が付く（6章の「券の漏れ」を参照）。
+
+### アプリ内ブラウザのバーとページの寸法（要実測）
+
+アプリ内ブラウザは、画面の上下に自分のバー（X なら下の黒い帯と、その上に浮く「×・<・URL」のボタン列）を重ねることがある。ホストのページの下のボタンがバーに潜るかは、バーの高さがページにどう伝わるかで決まる。キットを使うアプリ全部に効くので、実測をここに残す。
+
+GeoCutter の観察（2026-10-16、Android の X）: プレイ画面のボタンは `env(safe-area-inset-bottom)` の分だけ持ち上がっていて、X の下の黒い帯のちょうど上に出た。この値を使っていない出典の行や下のメニューは、帯に隠れた。X がこの値で帯の高さを伝えている、という推測を、デモの「画面の寸法を測る」で確かめる。
+
+測るもの: `env(safe-area-inset-top/bottom/left/right)`、`innerHeight`、`visualViewport.height`・`offsetTop`、`documentElement.clientHeight`、`screen.height`、`devicePixelRatio`、`100vh`・`100dvh`・`100svh`・`100lvh`。viewport の meta の `viewport-fit=cover` のありなしと、スクロールしてバーが隠れたり出たりしたときの変化も見る。測る対象は X（Android・iOS）、LINE、Instagram。
+
+2026-10-16、Android 16（SCG13、画面 412×892、dpr 2.625）。値は CSS px。cover はページの viewport に `viewport-fit=cover` を付けたとき。どれも cover のありなしで値は変わらなかった。
+
+| 開いた場所 | バー | safe-area-inset（上下左右） | innerHeight（バーが出ている／隠れた） | 100vh・dvh・svh・lvh |
+|---|---|---|---|---|
+| LINE 26.15.1 のアプリ内ブラウザ | 上に URL、下に「< > ↻ 共有 ⋮」。スクロールで両方隠れる | すべて 0 | 708 ／ 779（71 増える） | 4つとも innerHeight と同じで、一緒に変わる |
+| Instagram 452 のアプリ内ブラウザ | 上に「× URL」。下は無い。スクロールしても隠れない | すべて 0 | 764（変わらない） | すべて 764 |
+| X 12.34 → Chrome のカスタムタブ（自分宛ての DM から） | 上に「× ∨ タイトル 共有 ⋮」。スクロールで隠れる | すべて 0 | 756 ／ 812（56 増える） | vh・lvh 812、svh 756、dvh は innerHeight と同じ |
+| X 12.34 自身のアプリ内ブラウザ | 一番下に黒い帯（返信・リポスト・いいね等）、その上に「× URL ⋮」の浮いた列。スクロールしても隠れない | 下 48、ほかは 0 | 788（変わらない） | すべて 788.6 |
+
+分かったこと:
+
+- LINE・Instagram・カスタムタブでは、アプリのバーはページに重ならない。ページの表示範囲がバーの分だけ小さくなり、`position: fixed; bottom: 0` の要素はいつもバーのすぐ上に出た（デモの赤と緑の線で確認）。下のボタンが潜ることは無い。
+- `env(safe-area-inset-*)` は X 自身のアプリ内ブラウザ以外では 0。LINE・Instagram はバーの高さを safe-area では伝えていない。
+- LINE は下のバーが隠れると表示範囲が 71px 伸び、`100vh` も一緒に変わる（Chrome と違い、`100vh` が大きい方に固定されない）。
+- X 自身のアプリ内ブラウザ（GeoCutter が見た「下の黒い帯と、その上に浮く『×・URL』」の見た目）だけは違う。`env(safe-area-inset-bottom)` が 48px になる（`viewport-fit=cover` のありなしで変わらない）。さらに、**`position: fixed; bottom: 0` の位置と、`100vh`・`innerHeight` の下端が一致しない**。画面の写し（ページの上端から CSS px で測った。誤差 ±2px）では次のとおり。
+
+  | もの | ページの上端から |
+  |---|---|
+  | 緑の線（`bottom: env(safe-area-inset-bottom)`） | 654 |
+  | 赤の線（`bottom: 0`）＝浮いた「× URL ⋮」の列の上端 | 704 |
+  | 浮いた列の下端（列の高さ約 33） | 737 |
+  | 黒い帯の上端 | 約 747 |
+  | `100vh`・`100dvh`・`innerHeight` の下端（788） | 788（黒い帯の裏） |
+  | `788 − 48`（`100vh` 基準の下端から env の分だけ上げた位置） | 740（浮いた列の下端あたり） |
+
+  - `position: fixed; bottom: 0` の要素は浮いた列のすぐ上に出て、列に隠れない。env の分を足すと、列との間に 48px の余白ができる。
+  - ページの高さを `100vh`・`100dvh`・`innerHeight` で決め、その下端に置いた要素（例: 全画面の縦並びの一番下のメニュー）は黒い帯の裏まで行く。env の 48px だけ持ち上げても、ちょうど浮いた列の高さに来て、下半分が列に隠れる。`100vh` 基準で置くなら、さらに約 50px（列と、列から帯までの隙間）上げる必要がある。
+  - ページの文字は赤の線より下（浮いた列の裏や横、黒い帯の上端まで）にも描かれる。
+  - スクロールしても値は変わらない。測っている途中で一瞬だけ safe-top 31・innerHeight 819 になったことがあった（すぐ 788 に戻る。何かの切り替えの途中と見られる）。
+- X のアプリ内ブラウザの iOS 版は未測定。
 
 ### 外のブラウザを開けたかの判定
 
@@ -244,6 +302,7 @@ interface EscapeFlowHost {
   issue(): Promise<{ ticket: string; expiresAt: number }>; // ホストの API を呼ぶ（用途 escape）
   peek(ticket: string): Promise<TicketLookup>;
 }
+// press({ browser: 'chrome' }) で plan.alternatives の開き方を使う（iOS の Chrome）。届かなかった状態には browser が入る。
 function createEscapeFlow(host: EscapeFlowHost, opts: {
   context: BrowserContext;
   owner?: string;    // 券の持ち主。保存した券の持ち主と違えば使わない

@@ -261,17 +261,95 @@ def x_link():
     raise Fail(f'どこで開いたか分からない（{places}）')
 
 
+# ---------- 画面の寸法を測る（デモの「画面の寸法を測る」） ----------
+# 値はデモが記録に残すので、ここでは操作と画面の写しだけ。結果は `npm run logs -- 15 --ua <アプリ>` で読む。
+
+def scroll_page(direction, times=1):
+    """ページを動かす。'down' は下の方を見る（指を上へ）。"""
+    for _ in range(times):
+        if direction == 'down':
+            phone.shell('input swipe 540 1700 540 700 300')
+        else:
+            phone.shell('input swipe 540 700 540 1700 300')
+        time.sleep(1.2)
+
+
+def find_id_scrolling(*names, max_scrolls=10):
+    """どれかの部品が画面の中に見えるまで下へ動かす。見えた名前と部品を返す。"""
+    for _ in range(max_scrolls):
+        nodes = phone.dump()
+        for name in names:
+            hits = phone.find(rid(name), nodes, field='rid')
+            if hits and 250 < hits[0].center[1] < 2050:
+                return name, hits[0]
+        scroll_page('down')
+    raise Fail(f'{"・".join(names)} が見つからない')
+
+
+def tap_id_scrolling(name):
+    phone.tap_node(find_id_scrolling(name)[1])
+
+
+def snap(label):
+    return phone.screenshot(os.path.join(OUT, f'{label}.png'))
+
+
+def measure_here(app):
+    """今開いているデモで、寸法を測る（cover あり・なし、上と下へのスクロール）。"""
+    name, node = find_id_scrolling('measure-start', 'measure-stop')
+    if name == 'measure-start':
+        phone.tap_node(node)  # オンにすると読み込み直す
+        time.sleep(4)
+    else:
+        scroll_page('up', 6)
+    shots = []
+    for fit in ('cover', 'nofit'):
+        time.sleep(2)
+        shots.append(snap(f'measure_{app}_{fit}_top'))
+        scroll_page('down', 3)
+        shots.append(snap(f'measure_{app}_{fit}_scrolled'))
+        scroll_page('up', 5)
+        time.sleep(2)
+        tap_id_scrolling('measure-fit')  # cover を切り替えて読み込み直す
+        time.sleep(4)
+    # 元に戻す（cover あり・測るのをやめる）。
+    tap_id_scrolling('measure-stop')
+    time.sleep(3)
+    return f'測った（画面の写し {len(shots)} 枚: {os.path.dirname(shots[0])}）'
+
+
+def measure_x():
+    open_x()
+    phone.wait_for(r'(^|/)place-', timeout=20, field='rid')
+    return measure_here('x')
+
+
+def measure_line():
+    open_line()
+    at_demo()
+    return measure_here('line')
+
+
+def measure_ig():
+    open_instagram()
+    at_demo()
+    return measure_here('instagram')
+
+
 SCENARIOS = {f.__name__: f for f in [line_button, ig_next, ig_back, ig_away, x_link]}
+# 寸法は、名前を指定したときだけ流す（python run.py measure_x measure_line measure_ig）。
+MEASURE = {f.__name__: f for f in [measure_x, measure_line, measure_ig]}
 
 
 def main(names):
     os.makedirs(OUT, exist_ok=True)
     results = []
     for name in names or SCENARIOS:
+        scenario = SCENARIOS.get(name) or MEASURE[name]
         started = time.strftime('%H:%M:%S')
         try:
             phone.wake()
-            note = SCENARIOS[name]()
+            note = scenario()
             results.append((name, 'OK', note))
         except Exception as e:  # noqa: BLE001
             shot = phone.screenshot(os.path.join(OUT, f'{name}.png'))

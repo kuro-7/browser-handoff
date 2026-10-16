@@ -34,8 +34,23 @@ export type EscapeFallback =
    */
   | { kind: 'retry'; app: InAppName; platform: Platform };
 
+/**
+ * 開く先のブラウザ。`default` は OS のふだん使いのブラウザ（Android の intent://、アプリが既定のブラウザに渡す方法）。
+ * iOS ではふだん使いのブラウザを Chrome にしていても、`x-safari-https://` は Safari を開く。
+ */
+export type EscapeBrowser = 'default' | 'safari' | 'chrome';
+
 export interface EscapePlan {
   step: EscapeStep;
+  /** `step` で開くブラウザ。`step.kind === 'none'` のときは無い。 */
+  browser?: EscapeBrowser;
+  /**
+   * `step` の代わりに選べる開き方（iOS の「Chrome で開く」など）。ホストは利用者に選んでもらうボタンを出してよい。
+   * iOS の Chrome は Safari と保存領域が別なので、Chrome をふだん使いにしている人は Safari に移しても、
+   * あとで Chrome で開くとまた最初からになる。iOS からは、ふだん使いのブラウザも Chrome が入っているかも分からない。
+   * 入っていない Chrome を選ぶと、何も起きずに合図が来ないので、ふつうの「ボタンでは開けなかった」になる。
+   */
+  alternatives?: Partial<Record<Exclude<EscapeBrowser, 'default'>, EscapeStep>>;
   fallback: EscapeFallback;
   /**
    * 開けたかの合図を待つ時間の目安（ms）。無ければ escapeToBrowser の既定。
@@ -80,40 +95,54 @@ export function planEscape(context: BrowserContext, targetUrl: string): EscapePl
     ? { kind: 'retry', app, platform: context.platform }
     : { kind: 'menu', app, platform: context.platform, menu: MENU_HINTS[context.platform]?.[app] ?? null };
   if (context.kind !== 'in-app') return { step: { kind: 'none' }, fallback };
-  const step = escapeStep(context.platform, app, new URL(targetUrl));
-  if (step.kind === 'navigate' && context.platform === 'android' && app === 'instagram') {
-    return { step, fallback, graceMs: CONFIRM_GRACE_MS };
-  }
-  return { step, fallback };
+  const target = new URL(targetUrl);
+  const { step, browser } = escapeStep(context.platform, app, target);
+  const plan: EscapePlan = { step, fallback };
+  if (step.kind === 'navigate') plan.browser = browser;
+  if (step.kind === 'navigate' && context.platform === 'android' && app === 'instagram') plan.graceMs = CONFIRM_GRACE_MS;
+  // iOS は Chrome でも開けるようにする（要確認: アプリ内ブラウザから googlechromes:// へ移れるか）。
+  if (context.platform === 'ios') plan.alternatives = { chrome: chromeStep(target) };
+  return plan;
+}
+
+/** iOS の Chrome で開く（https は googlechromes://、http は googlechrome://）。 */
+function chromeStep(target: URL): EscapeStep {
+  const scheme = target.protocol === 'http:' ? 'googlechrome' : 'googlechromes';
+  return { kind: 'navigate', href: `${scheme}://${target.href.slice(target.protocol.length + 2)}` };
 }
 
 /** LINE が外のブラウザで開き直す合図のパラメータ。開いた先では要らないので、引換券と一緒に消す。 */
 export const LINE_EXTERNAL_PARAM = 'openExternalBrowser';
 
-function escapeStep(platform: Platform, app: InAppName, target: URL): EscapeStep {
-  // LINE は iOS・Android とも、このパラメータで外のブラウザに開き直す。
+function escapeStep(platform: Platform, app: InAppName, target: URL): { step: EscapeStep; browser: EscapeBrowser } {
+  // LINE は iOS・Android とも、このパラメータで外のブラウザに開き直す（どのブラウザかは LINE が決める。要確認）。
   if (app === 'line') {
     const url = new URL(target);
     url.searchParams.set(LINE_EXTERNAL_PARAM, '1');
-    return { kind: 'navigate', href: url.href };
+    return { step: { kind: 'navigate', href: url.href }, browser: 'default' };
   }
 
   if (platform === 'ios') {
-    if (app === 'instagram') return { kind: 'navigate', href: `instagram://extbrowser/?url=${encodeURIComponent(target.href)}` };
-    if (app === 'threads') return { kind: 'navigate', href: `barcelona://extbrowser/?url=${encodeURIComponent(target.href)}` };
+    // extbrowser がどのブラウザを開くか（ふだん使いか Safari か）は要確認。
+    if (app === 'instagram') {
+      return { step: { kind: 'navigate', href: `instagram://extbrowser/?url=${encodeURIComponent(target.href)}` }, browser: 'default' };
+    }
+    if (app === 'threads') {
+      return { step: { kind: 'navigate', href: `barcelona://extbrowser/?url=${encodeURIComponent(target.href)}` }, browser: 'default' };
+    }
     // それ以外は Safari のスキーム。http（開発中）なら x-safari-http。
-    return { kind: 'navigate', href: `x-safari-${target.href}` };
+    return { step: { kind: 'navigate', href: `x-safari-${target.href}` }, browser: 'safari' };
   }
 
   if (platform === 'android') {
     // X の WebView は intent:// も googlechrome:// も開けない（2026-10-16 確認）。
     // intent:// では X が「このアクションを実行できるアプリはありません」を出して利用者を不安にさせるので、メニューに任せる。
-    if (app === 'x') return { kind: 'none' };
+    if (app === 'x') return { step: { kind: 'none' }, browser: 'default' };
     // 既定のブラウザで開く。
     const scheme = target.protocol.replace(/:$/, '');
     const rest = target.href.slice(target.protocol.length + 2); // "//" の後ろ
-    return { kind: 'navigate', href: `intent://${rest}#Intent;scheme=${scheme};end` };
+    return { step: { kind: 'navigate', href: `intent://${rest}#Intent;scheme=${scheme};end` }, browser: 'default' };
   }
 
-  return { kind: 'none' };
+  return { step: { kind: 'none' }, browser: 'default' };
 }
