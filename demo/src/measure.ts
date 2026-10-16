@@ -92,7 +92,8 @@ export function measureCard(record: (text: string) => void): HTMLElement {
     ? '値は右上の枠に出ています。上下にスクロールして、アプリのバーが隠れたり出たりしたときに値が変わるか見てください。変わった値は自動で記録に残ります。赤い線が画面の一番下（bottom: 0）、緑の線が env(safe-area-inset-bottom) の高さです。'
     : 'アプリ内ブラウザのバーとページの寸法の関係を調べるときに使います。オンにすると、値を画面に出し続け、ページを縦に長くします。';
   const toggle = document.createElement('button');
-  toggle.id = 'measure-toggle';
+  // 実機の自動確認が状態を見分けられるよう、オンとオフで名前を変える。
+  toggle.id = on ? 'measure-stop' : 'measure-start';
   toggle.textContent = on ? '測るのをやめる' : '測る';
   toggle.onclick = () => {
     store(MEASURE_KEY, on ? '0' : '1');

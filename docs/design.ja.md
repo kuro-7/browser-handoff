@@ -135,9 +135,24 @@ GeoCutter の観察（2026-10-16、Android の X）: プレイ画面のボタン
 
 測るもの: `env(safe-area-inset-top/bottom/left/right)`、`innerHeight`、`visualViewport.height`・`offsetTop`、`documentElement.clientHeight`、`screen.height`、`devicePixelRatio`、`100vh`・`100dvh`・`100svh`・`100lvh`。viewport の meta の `viewport-fit=cover` のありなしと、スクロールしてバーが隠れたり出たりしたときの変化も見る。測る対象は X（Android・iOS）、LINE、Instagram。
 
-| アプリ | 結果 |
-|---|---|
-| （未測定） | |
+2026-10-16、Android 16（SCG13、画面 412×892、dpr 2.625）。値は CSS px。cover はページの viewport に `viewport-fit=cover` を付けたとき。どれも cover のありなしで値は変わらなかった。
+
+| 開いた場所 | バー | safe-area-inset（上下左右） | innerHeight（バーが出ている／隠れた） | 100vh・dvh・svh・lvh |
+|---|---|---|---|---|
+| LINE 26.15.1 のアプリ内ブラウザ | 上に URL、下に「< > ↻ 共有 ⋮」。スクロールで両方隠れる | すべて 0 | 708 ／ 779（71 増える） | 4つとも innerHeight と同じで、一緒に変わる |
+| Instagram 452 のアプリ内ブラウザ | 上に「× URL」。下は無い。スクロールしても隠れない | すべて 0 | 764（変わらない） | すべて 764 |
+| X 12.34 → Chrome のカスタムタブ（自分宛ての DM から） | 上に「× ∨ タイトル 共有 ⋮」。スクロールで隠れる | すべて 0 | 756 ／ 812（56 増える） | vh・lvh 812、svh 756、dvh は innerHeight と同じ |
+| X 12.34 自身のアプリ内ブラウザ | 一番下に黒い帯（返信・リポスト・いいね等）、その上に「× URL ⋮」の浮いた列。スクロールしても隠れない | 下 48、ほかは 0 | 788（変わらない） | すべて 788.6 |
+
+分かったこと:
+
+- LINE・Instagram・カスタムタブでは、アプリのバーはページに重ならない。ページの表示範囲がバーの分だけ小さくなり、`position: fixed; bottom: 0` の要素はいつもバーのすぐ上に出た（デモの赤と緑の線で確認）。下のボタンが潜ることは無い。
+- `env(safe-area-inset-*)` は X 自身のアプリ内ブラウザ以外では 0。LINE・Instagram はバーの高さを safe-area では伝えていない。
+- LINE は下のバーが隠れると表示範囲が 71px 伸び、`100vh` も一緒に変わる（Chrome と違い、`100vh` が大きい方に固定されない）。
+- X 自身のアプリ内ブラウザ（GeoCutter が見た「下の黒い帯と、その上に浮く『×・URL』」の見た目）だけは違う。`env(safe-area-inset-bottom)` が 48px になる（`viewport-fit=cover` のありなしで変わらない）。デモの緑の線（`bottom: env(safe-area-inset-bottom)`）は浮いた「× URL ⋮」の列のすぐ上に、赤い線（`bottom: 0`）は浮いた列の上端あたりに出た。ページの文字は浮いた列の裏や横にも見えた。
+  - X は浮いた列の分を safe-area-inset-bottom で知らせている、と読める。下に置くボタンを `env(safe-area-inset-bottom)` 分持ち上げれば列に重ならない。`bottom: 0` にぴったり置いた要素は列と接するか重なる。
+  - スクロールしても値は変わらない。測っている途中で一瞬だけ safe-top 31・innerHeight 819 になったことがあった（すぐ 788 に戻る。何かの切り替えの途中と見られる）。
+- X のアプリ内ブラウザの iOS 版は未測定。
 
 ### 外のブラウザを開けたかの判定
 
