@@ -131,4 +131,4 @@ python run.py ig_next x_link  # 選んだものだけ
 - 文言ではなく名前で探します。デモのページは HTML の id（`escape-button`、`status-arrived`、`place-in-app` など）、Instagram の確認は Android 標準の `button1`（次へ）・`button2`（戻る）、Instagram の会話は URL で直接開きます。
 - 名前の無い LINE のトーク検索と X のメニューだけは、端末の言語ごとの言葉（`run.py` の `WORDS`）を使います。確かめたのは日本語だけです。
 - デモのリンクを置いた場所（Instagram の会話、X のアカウント、LINE のトーク）は、`device/accounts.json` に書きます（git には入りません）。書き方は `device/accounts.example.json` を見てください。
-- 環境変数: `ADB`（adb の場所）、`HANDOFF_OUT`（失敗したときの画面の写しの置き場所）。
+- 環境変数: `ADB`（adb の場所）、`HANDOFF_OUT`（失敗したときの画面の写しの置き場所）、`HANDOFF_ACCOUNTS`（accounts.json の場所。worktree から流すときに本体のものを指す）。

@@ -31,7 +31,8 @@ DEMO_HOST = r'^browser-handoff-demo\.pages\.dev$'
 
 # デモのリンクを置いた場所は、流す人のアカウントなので repo に入れない。
 # accounts.json（git に入らない）に書く。書き方は accounts.example.json。
-ACCOUNTS_FILE = os.path.join(os.path.dirname(__file__), 'accounts.json')
+# worktree から流すときは、環境変数 HANDOFF_ACCOUNTS で本体の accounts.json を指せる。
+ACCOUNTS_FILE = os.environ.get('HANDOFF_ACCOUNTS') or os.path.join(os.path.dirname(__file__), 'accounts.json')
 
 
 def _accounts():
