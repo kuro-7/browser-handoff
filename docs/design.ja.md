@@ -452,6 +452,7 @@ URL に付けた引換券は、利用者が「リンクをコピー」や共有�
   - A3/A4: Android の X が Custom Tabs 型か、`intent://` が効くか
   - B1: iOS で差し替えた manifest の `start_url` が使われるか（iOS 26 の「Webアプリとして開く」がオンのとき）。追加した翌日以降に初めて開いても届くか
 - デモページの結果を見て、`planEscape` の表と B1 を採るかを決める。
+- iPhone で確かめる手順は、チェックリストにまとめた: [`ios-check.ja.md`](ios-check.ja.md)。
 
 ## 9. 未決
 
