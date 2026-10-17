@@ -89,7 +89,7 @@ export function measureCard(record: (text: string) => void): HTMLElement {
   const note = document.createElement('p');
   note.className = 'note';
   note.textContent = on
-    ? '値は右上の枠に出ています。上下にスクロールして、アプリのバーが隠れたり出たりしたときに値が変わるか見てください。変わった値は自動で記録に残ります。赤い線が画面の一番下（bottom: 0）、緑の線が env(safe-area-inset-bottom) の高さです。'
+    ? '値は右上の枠に出ています。上下にスクロールして、アプリのバーが隠れたり出たりしたときに値が変わるか見てください。変わった値は自動で記録に残ります。赤い線が画面の一番下（bottom: 0）、緑の線が env(safe-area-inset-bottom) の高さ、青い線が 100vh の下端、真ん中の短い橙の線が 100dvh の下端です。左端の目盛りは上から 50px ごとです。'
     : 'アプリ内ブラウザのバーとページの寸法の関係を調べるときに使います。オンにすると、値を画面に出し続け、ページを縦に長くします。';
   const toggle = document.createElement('button');
   // 実機の自動確認が状態を見分けられるよう、オンとオフで名前を変える。
@@ -131,7 +131,29 @@ export function measureCard(record: (text: string) => void): HTMLElement {
   const safeLine = document.createElement('div');
   safeLine.style.cssText =
     'position:fixed;left:0;right:0;bottom:env(safe-area-inset-bottom);height:3px;background:#30a46c;z-index:49;pointer-events:none;';
-  document.body.append(box, bottomLine, safeLine);
+  // 100vh・100dvh の下端（上から測った位置）。Android の X では bottom: 0 と一致しなかったので、画面の写しで見比べる。
+  const vhLine = document.createElement('div');
+  vhLine.style.cssText = 'position:fixed;left:0;right:0;top:calc(100vh - 3px);height:3px;background:#3e63dd;z-index:49;pointer-events:none;';
+  const dvhLine = document.createElement('div');
+  dvhLine.style.cssText =
+    'position:fixed;left:30%;right:30%;top:calc(100dvh - 3px);height:3px;background:#f76b15;z-index:49;pointer-events:none;';
+  // 左端の目盛り（50 CSS px ごと、ページの表示範囲の上端から）。画面の写しから線や帯の位置を CSS px で読むため。
+  const ruler = document.createElement('div');
+  ruler.style.cssText = 'position:fixed;left:0;top:0;width:34px;height:1200px;z-index:48;pointer-events:none;';
+  for (let y = 0; y <= 1200; y += 50) {
+    const tick = document.createElement('div');
+    tick.style.cssText =
+      `position:absolute;left:0;top:${y}px;width:${y % 100 === 0 ? 14 : 8}px;height:1px;background:#e5484d;` +
+      'font:9px/1 ui-monospace,Menlo,Consolas,monospace;color:#e5484d;';
+    if (y % 100 === 0 && y > 0) {
+      const label = document.createElement('span');
+      label.textContent = String(y);
+      label.style.cssText = 'position:absolute;left:15px;top:-4px;background:rgba(255,255,255,.8);';
+      tick.append(label);
+    }
+    ruler.append(tick);
+  }
+  document.body.append(box, bottomLine, safeLine, vhLine, dvhLine, ruler);
 
   const px = makeProbe();
   let last = '';
