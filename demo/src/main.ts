@@ -218,8 +218,8 @@ function describePlace(c: BrowserContext): string {
       ? `${APP_NAMES[c.app ?? 'other']} のアプリ内ブラウザ`
       : c.kind === 'standalone'
         ? 'ホーム画面アプリ'
-        : '通常のブラウザ';
-  return `${PLATFORM_NAMES[c.platform]} の${place}`;
+        : `通常のブラウザ（${browser}）`;
+  return `${PLATFORM_NAMES[c.platform]} の${place}${forcedApp === null ? '' : '（手で切り替え中）'}`;
 }
 
 // 設計書 4章の表の、実際の項目名。キットは場所の種類（MenuHint）しか返さないので、画面の言葉はホスト（ここ）が持つ。
@@ -328,8 +328,27 @@ const env = {
   displayModeStandalone: matchMedia('(display-mode: standalone)').matches,
   maxTouchPoints: navigator.maxTouchPoints,
 };
-const context = detectContext(env);
-where = [context.platform, context.kind, context.app].filter(Boolean).join('/');
+const detected = detectContext(env);
+// iOS の X のアプリ内ブラウザは SFSafariViewController と言われ、UA が Safari と同じなので「通常のブラウザ」と判定される。
+// そのとき試せるように、アプリ内ブラウザとして扱う切り替えを持つ（その保存場所だけに残る）。
+const FORCE_KEY = 'demo.forceInApp';
+const forcedApp = detected.kind === 'browser' ? load<InAppName | null>(FORCE_KEY, null) : null;
+const context: BrowserContext =
+  forcedApp === null ? detected : { platform: detected.platform, kind: 'in-app', app: forcedApp, storage: 'separate' };
+where = [context.platform, context.kind, context.app, forcedApp === null ? '' : 'forced'].filter(Boolean).join('/');
+
+/** 開いているブラウザの名前（UA から。キットは見分けないので、デモが持つ）。Chrome をふだん使いにした iPhone で、どれが開いたかを見るため。 */
+function browserName(ua: string): string {
+  if (/\bCriOS\//.test(ua)) return 'Chrome';
+  if (/\bEdgiOS\/|\bEdgA?\//.test(ua)) return 'Edge';
+  if (/\bFxiOS\/|\bFirefox\//.test(ua)) return 'Firefox';
+  if (/\bGSA\//.test(ua)) return 'Google アプリ';
+  if (/\bSamsungBrowser\//.test(ua)) return 'Samsung Internet';
+  if (/\bChrome\//.test(ua)) return 'Chrome';
+  if (/\bVersion\/[\d.]+.*\bSafari\//.test(ua)) return 'Safari';
+  return '不明';
+}
+const browser = browserName(env.userAgent);
 const launchUrl = location.href;
 const hadSubjectAtLaunch = loadSubject() !== null;
 
@@ -371,6 +390,40 @@ function renderSubject(): void {
         renderSubject();
       } }, '新しい ID にする'),
     ),
+  );
+}
+
+// ---------- 場所の判定が違ったとき ----------
+
+const FORCE_APPS: InAppName[] = ['x', 'line', 'instagram', 'threads', 'facebook', 'other'];
+
+/** 「通常のブラウザ」と出たのに実はアプリの中だったとき、アプリ内ブラウザとして扱う（その保存場所にだけ残る）。 */
+function forceCard(): HTMLElement | null {
+  if (detected.kind !== 'browser') return null;
+  if (forcedApp !== null) {
+    return h(
+      'p',
+      { class: 'note' },
+      `判定は「通常のブラウザ」でしたが、${APP_NAMES[forcedApp]} のアプリ内ブラウザとして扱っています。 `,
+      h('button', { id: 'force-off', onclick: () => {
+        save(FORCE_KEY, null);
+        record('アプリ内ブラウザとして扱うのをやめた');
+        location.reload();
+      } }, '元に戻す'),
+    );
+  }
+  if (detected.platform !== 'ios') return null;
+  const select = h('select', { id: 'force-app' }, ...FORCE_APPS.map((a) => h('option', { value: a }, APP_NAMES[a])));
+  return h(
+    'details',
+    {},
+    h('summary', { class: 'note' }, 'アプリの中で開いているのに「通常のブラウザ」と出たとき'),
+    h('p', { class: 'note' }, 'iOS の X などは、Safari と同じ名乗りのアプリ内ブラウザを使うので、見分けられないことがあります。どのアプリの中かを選ぶと、アプリ内ブラウザとして試せます。'),
+    h('div', { class: 'row' }, select, h('button', { id: 'force-on', onclick: () => {
+      save(FORCE_KEY, select.value);
+      record(`観察: 場所の判定が違った（実際は ${APP_NAMES[select.value as InAppName]} の中）→ アプリ内ブラウザとして扱う`);
+      location.reload();
+    } }, 'アプリ内ブラウザとして扱う')),
   );
 }
 
@@ -741,15 +794,22 @@ async function settle(ticket: string, choice: 'take' | 'keep'): Promise<void> {
 
 /** ページを開いたときの受け取り。メニューの案内の途中（escapePending）なら、その結果を返す。 */
 async function runRedemption(): Promise<StartRedemptionResult | null> {
-  const fromStartUrl = new URL(launchUrl).searchParams.get('src') === 'home-screen';
+  // src=home-screen は manifest の start_url、src=address-bar は追加したときのページの URL（「URL にも付ける」をオンにしたとき）。
+  const src = new URL(launchUrl).searchParams.get('src');
+  const launchSource =
+    src === 'home-screen'
+      ? 'manifest の start_url で開いた'
+      : src === 'address-bar'
+        ? '追加したときのページの URL で開いた（start_url ではない）'
+        : 'start_url ではない URL で開いた';
   record(
     `ページを開いた: ${maskUrl(launchUrl)} ID${hadSubjectAtLaunch ? 'あり' : 'なし'}${
-      context.kind === 'standalone' ? ` start_url=${fromStartUrl ? 'はい' : 'いいえ'}` : ''
+      context.kind === 'standalone' ? ` 起動=${src ?? 'なし'}（${launchSource}）` : ''
     }`,
   );
   const facts: Array<[string, Child]> = [['開いた URL', h('code', {}, maskUrl(launchUrl))]];
   if (context.kind === 'standalone') {
-    facts.push(['起動 URL', fromStartUrl ? 'manifest の start_url で開いた' : 'start_url ではない URL で開いた']);
+    facts.push(['起動 URL', launchSource]);
   }
 
   let started: StartRedemptionResult | null = null;
@@ -818,6 +878,7 @@ function receiveCard(): HTMLElement {
 // ---------- ホーム画面に追加（B1） ----------
 
 const PREP_AT_LOAD_KEY = 'demo.homePrepAtLoad';
+const ADDRESS_BAR_KEY = 'demo.homeAddressBar';
 const homeView = h('div');
 let restoreManifest: (() => void) | null = null;
 
@@ -829,6 +890,11 @@ async function prepareHomeScreen(): Promise<void> {
     restoreManifest?.();
     restoreManifest = overrideManifest(manifestUrl);
     record(`manifest を差し替えた: ${maskUrl(manifestUrl)}`);
+    if (load(ADDRESS_BAR_KEY, false)) {
+      // iOS が start_url を使わず、追加したときのページの URL で開く場合の代わり。印を変えて、どちらで届いたか見分ける。
+      history.replaceState(null, '', withTicket(new URL('/?src=address-bar', location.origin).href, t.ticket));
+      record(`ページの URL にも券を付けた: ${maskUrl(location.href)}`);
+    }
     const manifest = (await (await fetch(manifestUrl)).json()) as { id?: string; start_url?: string };
     fill(
       homeView,
@@ -868,10 +934,25 @@ function homeSettings(): HTMLElement {
     save(PREP_AT_LOAD_KEY, prepAtLoad.checked);
     record(`開いたときに自動で用意する: ${prepAtLoad.checked ? 'オン' : 'オフ'}`);
   });
+  const addressBar = h('input', { type: 'checkbox', id: 'home-address-bar' });
+  addressBar.checked = load(ADDRESS_BAR_KEY, false);
+  addressBar.addEventListener('change', () => {
+    save(ADDRESS_BAR_KEY, addressBar.checked);
+    record(`ページの URL にも券を付ける: ${addressBar.checked ? 'オン' : 'オフ'}`);
+  });
   return h(
     'div',
-    { class: 'row' },
-    h('label', { class: 'note' }, prepAtLoad, ' ページを開いたときにホーム画面用の券を自動で用意する（iOS が manifest を読む時機を確かめる用）'),
+    {},
+    h(
+      'div',
+      { class: 'row' },
+      h('label', { class: 'note' }, prepAtLoad, ' ページを開いたときにホーム画面用の券を自動で用意する（iOS が manifest を読む時機を確かめる用）'),
+    ),
+    h(
+      'div',
+      { class: 'row' },
+      h('label', { class: 'note' }, addressBar, ' 用意したとき、ページの URL にも券を付ける（start_url が使われなかったときの代わりを試す用。起動 URL の印が src=address-bar になる）'),
+    ),
   );
 }
 
@@ -1021,7 +1102,7 @@ async function main(): Promise<void> {
 
   fill(
     app,
-    h('section', { class: 'hero' }, h('p', { class: 'place', id: `place-${context.kind}` }, describePlace(context)), h('p', {}, mainHint()), idChip),
+    h('section', { class: 'hero' }, h('p', { class: 'place', id: `place-${context.kind}` }, describePlace(context)), h('p', {}, mainHint()), idChip, forceCard()),
     inApp ? escapeCard() : receiveCard(),
     inApp ? null : homeMain ? homeCard() : null,
     logCard(),
@@ -1031,7 +1112,7 @@ async function main(): Promise<void> {
       ...(homeMain ? homeExtras : [homeCard(), ...homeExtras]),
     ]),
   );
-  record(`場所: ${describePlace(context)}（${context.storage}） UA=${env.userAgent} 端末=${deviceId}`);
+  record(`場所: ${describePlace(context)}（${context.storage}） ブラウザ=${browser} UA=${env.userAgent} 端末=${deviceId}`);
   renderSubject();
   renderEscapeTicket();
   window.setInterval(() => {

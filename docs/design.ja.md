@@ -7,7 +7,7 @@
 Web アプリを遊んでいる人が、保存領域の違う場所へ移るときに、ログインなしで「誰か」（アカウント）を持っていく。
 
 - アプリ内ブラウザ（X・LINE・Instagram など）→ 通常のブラウザ
-- iOS の Safari など → ホーム画面アプリ
+- iOS のブラウザ（Safari・Chrome など）→ ホーム画面アプリ
 
 保存領域が同じ場所への移動（Android の Chrome → ホーム画面アプリ、Custom Tabs → Chrome など）では何もしない。
 
@@ -77,7 +77,7 @@ flowchart LR
 | A3（Android） | Custom Tabs 型と分かれば `storage: shared` を返し、引換券を出さない |
 | A4（Android・ボタン1つ） | `intent://…#Intent;scheme=https;end` で既定のブラウザを開く（X は `intent://` を開けないので除き、メニューに任せる）。A1 と同じく、ボタンのクリックの処理の中で呼ぶ |
 | A5（Android・アプリのメニュー） | A2 と同じ。ただし Android の Instagram はメニューでは券が届かないので、`fallback: retry` を返し、ホストは「もう一度ボタンを押して『次へ』」と案内する |
-| B1（iOS・Mac の Safari） | 追加の手順を出すときに引換券（`home-screen`）を発行し、`<link rel="manifest">` を引換券付きの URL に差し替える。サーバーは `start_url` に引換券を入れた manifest を返す。アプリの初回起動で受け取る。追加してから初めて開くまでに日が空くことがあるので、期限は長くする（6章） |
+| B1（iOS のブラウザ・Mac の Safari） | iOS では Safari のほか Chrome なども「ホーム画面に追加」ができ、追加したアプリはどのブラウザとも保存領域が別なので、どのブラウザでも同じ手順にする（Mac で別なのは Safari だけ）。追加の手順を出すときに引換券（`home-screen`）を発行し、`<link rel="manifest">` を引換券付きの URL に差し替える。サーバーは `start_url` に引換券を入れた manifest を返す。アプリの初回起動で受け取る。追加してから初めて開くまでに日が空くことがあるので、期限は長くする（6章） |
 | B2 | 届かなかったと分かったら（初回起動で端末に主体が無く、引換券も無い）、`fallback: host-login` を返す。ログインはホストの仕事 |
 | B3・B4 | `storage: shared` を返し、何もしない。追加のダイアログは pwa-install などに任せる（キットの範囲外） |
 
@@ -450,8 +450,9 @@ URL に付けた引換券は、利用者が「リンクをコピー」や共有�
   - A1: X・LINE・Instagram（iOS）でボタンから Safari が開くか。開く前に「Safari で開きますか？」のような確認が出て、1回余分に押すことになるか
   - A2・A5: 4章のメニューの表が今の版と合っているか
   - A3/A4: Android の X が Custom Tabs 型か、`intent://` が効くか
-  - B1: iOS で差し替えた manifest の `start_url` が使われるか（iOS 26 の「Webアプリとして開く」がオンのとき）。追加した翌日以降に初めて開いても届くか
+  - B1: iOS で差し替えた manifest の `start_url` が使われるか（iOS 26 の「Webアプリとして開く」がオンのとき）。Safari から追加したときと Chrome から追加したときの両方。追加した翌日以降に初めて開いても届くか
 - デモページの結果を見て、`planEscape` の表と B1 を採るかを決める。
+- iPhone で確かめる手順は、チェックリストにまとめた: [`ios-check.ja.md`](ios-check.ja.md)。
 
 ## 9. 未決
 
