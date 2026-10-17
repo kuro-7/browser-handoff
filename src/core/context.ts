@@ -81,7 +81,7 @@ export function detectContext(env: ContextEnv): BrowserContext {
   return { platform, kind: 'browser', storage: browserToHomeScreen(platform, ua) };
 }
 
-/** ブラウザとホーム画面アプリの保存領域が同じか。iOS と Mac の Safari は別。 */
+/** ブラウザとホーム画面アプリの保存領域が同じか。iOS はどのブラウザ（Safari・Chrome など）から追加しても別、Mac は Safari だけ別。 */
 function browserToHomeScreen(platform: Platform, ua: string): StorageRelation {
   switch (platform) {
     case 'ios':
